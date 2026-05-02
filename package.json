@@ -1,0 +1,20 @@
+{
+  "name": "knowme-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "frontend",
+    "agent-runtime",
+    "shared"
+  ],
+  "scripts": {
+    "check:structure": "find . -maxdepth 2 -type d | sort",
+    "check:shared": "node shared/scripts/validate-shared.mjs",
+    "demo:runtime": "node examples/run-runtime-demo.mjs",
+    "demo:inspect": "node examples/run-inspect-demo.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
