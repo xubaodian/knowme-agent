@@ -106,7 +106,7 @@ export function createArtifactTools(): AgentTool[] {
 
         return {
           summary: `Artifact 已发布：${published.title}。`,
-          data: { id: published.id, kind: published.kind, title: published.title }
+          data: { artifact: published }
         };
       }
     }

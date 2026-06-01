@@ -3,6 +3,7 @@ import type { ArtifactManager } from "./artifacts/artifact-manager.js";
 import type { AgentEventBus } from "./core/event-bus.js";
 import type { LlmProvider } from "./llm/types.js";
 import type { RunLogger } from "../logging/index.js";
+import type { RunTraceRecorder } from "../logging/trace.js";
 import type { SkillRegistry } from "./skills/skill-registry.js";
 import type { TodoManager } from "./todos/todo-manager.js";
 import type { SandboxAdapter } from "./tools/sandbox/sandbox-adapter.js";
@@ -27,6 +28,7 @@ export type AgentRunInput = {
   skillsRoot: string;
   llmProvider?: LlmProvider;
   runLogger?: RunLogger;
+  trace?: RunTraceRecorder;
   onEvent: (event: RunEvent) => void;
   onArtifact: (artifact: Artifact) => void;
 };
@@ -54,6 +56,7 @@ export type ToolExecutionContext = {
   eventBus: AgentEventBus;
   llmProvider: LlmProvider;
   runLogger: RunLogger;
+  trace?: RunTraceRecorder;
   artifactManager: ArtifactManager;
   skillRegistry: SkillRegistry;
   sandbox: SandboxAdapter;

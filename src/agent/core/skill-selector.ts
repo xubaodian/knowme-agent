@@ -1,5 +1,6 @@
 import type { LlmProvider } from "../llm/types.js";
 import { completeWithLogging } from "../llm/llm-runner.js";
+import type { RunTraceRecorder } from "../../logging/trace.js";
 import { buildSkillSelectionSystemPrompt } from "../prompts/index.js";
 import type { LoadedSkill, SkillSummary } from "../skills/skill-registry.js";
 import type { ToolRunner } from "../tools/tool-runner.js";
@@ -11,7 +12,23 @@ export async function selectAndLoadSkill(options: {
   llmProvider: LlmProvider;
   toolRunner: ToolRunner;
   eventBus: AgentEventBus;
+  trace?: RunTraceRecorder;
+  parentTraceId?: string;
 }): Promise<LoadedSkill | undefined> {
+  const traceNodeId = await options.trace?.startNode({
+    parentId: options.parentTraceId ?? options.trace.rootNodeId,
+    type: "phase",
+    title: "Skill selection",
+    summary: `${options.skills.length} candidate skill(s).`,
+    input: {
+      prompt: options.prompt,
+      skills: options.skills
+    },
+    metadata: {
+      candidateCount: options.skills.length
+    }
+  });
+
   if (options.skills.length === 0) {
     options.eventBus.runLogger.event("skill.selection.skipped", {
       reason: "no_skills"
@@ -24,33 +41,63 @@ export async function selectAndLoadSkill(options: {
       flowKind: "thought",
       visibility: "secondary"
     });
+    await options.trace?.endNode(traceNodeId, {
+      status: "skipped",
+      summary: "No local skills found.",
+      output: {
+        selectedSkill: undefined
+      }
+    });
     return undefined;
   }
 
-  const selectedName =
-    options.skills.length === 1
-      ? selectOnlySkill(options.skills[0].name, options.eventBus)
-      : await askModelToSelectSkill(options.prompt, options.skills, options.llmProvider, options.eventBus);
-  options.eventBus.runLogger.event("skill.load.requested", {
-    skillName: selectedName,
-    candidateCount: options.skills.length
-  });
-  const skillResult = await options.toolRunner.run("load_skill", { name: selectedName });
-  const loadedSkill = skillResult.data as LoadedSkill;
+  try {
+    const selectedName =
+      options.skills.length === 1
+        ? selectOnlySkill(options.skills[0].name, options.eventBus)
+        : await askModelToSelectSkill(options.prompt, options.skills, options.llmProvider, options.eventBus, options.trace, traceNodeId);
+    options.eventBus.runLogger.event("skill.load.requested", {
+      skillName: selectedName,
+      candidateCount: options.skills.length
+    });
+    const skillResult = await options.toolRunner.run("load_skill", { name: selectedName }, { traceParentId: traceNodeId });
+    const loadedSkill = skillResult.data as LoadedSkill;
 
-  options.eventBus.runLogger.event("skill.loaded", {
-    skillName: loadedSkill.name,
-    contentChars: loadedSkill.content.length,
-    directory: loadedSkill.directory
-  });
+    options.eventBus.runLogger.event("skill.loaded", {
+      skillName: loadedSkill.name,
+      contentChars: loadedSkill.content.length,
+      directory: loadedSkill.directory
+    });
+    await options.trace?.endNode(traceNodeId, {
+      status: "success",
+      summary: `Selected ${loadedSkill.name}.`,
+      output: loadedSkill
+    });
 
-  return loadedSkill;
+    return loadedSkill;
+  } catch (error) {
+    await options.trace?.endNode(traceNodeId, {
+      status: "error",
+      summary: error instanceof Error ? error.message : "Skill selection failed.",
+      error
+    });
+    throw error;
+  }
 }
 
-async function askModelToSelectSkill(prompt: string, skills: SkillSummary[], llmProvider: LlmProvider, eventBus: AgentEventBus): Promise<string> {
+async function askModelToSelectSkill(
+  prompt: string,
+  skills: SkillSummary[],
+  llmProvider: LlmProvider,
+  eventBus: AgentEventBus,
+  trace?: RunTraceRecorder,
+  traceParentId?: string
+): Promise<string> {
   const response = await completeWithLogging({
     provider: llmProvider,
     runLogger: eventBus.runLogger,
+    trace,
+    traceParentId,
     phase: "skill-selector",
     request: {
       temperature: 0,

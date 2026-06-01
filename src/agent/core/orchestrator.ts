@@ -59,6 +59,22 @@ export class AgentOrchestrator {
     const llmProvider = input.llmProvider ?? createLlmProviderFromEnv();
     const sandbox = new LocalSandboxAdapter(input.workspaceRoot);
     const registry = new ToolRegistry();
+    const runtimeTraceNodeId = await input.trace?.startNode({
+      parentId: input.trace.rootNodeId,
+      type: "phase",
+      title: "Agent runtime",
+      summary: "Prepare provider, skills, tools, and execution loop.",
+      input: {
+        prompt: input.prompt,
+        run: input.run,
+        workspaceRoot: input.workspaceRoot,
+        skillsRoot: input.skillsRoot
+      },
+      metadata: {
+        workspaceRoot: input.workspaceRoot,
+        skillsRoot: input.skillsRoot
+      }
+    });
 
     registry.registerMany([
       ...createTodoTools(),
@@ -78,6 +94,7 @@ export class AgentOrchestrator {
       eventBus,
       llmProvider,
       runLogger,
+      trace: input.trace,
       artifactManager,
       skillRegistry,
       sandbox,
@@ -113,12 +130,17 @@ export class AgentOrchestrator {
     });
 
     if (!llmStatus.configured) {
-      runSpan.fail(new Error(llmStatus.reason ?? "LLM provider is required for agent execution."));
-      throw new Error(llmStatus.reason ?? "LLM provider is required for agent execution.");
+      const error = new Error(llmStatus.reason ?? "LLM provider is required for agent execution.");
+      await input.trace?.endNode(runtimeTraceNodeId, {
+        status: "error",
+        error
+      });
+      runSpan.fail(error);
+      throw error;
     }
 
     try {
-      const skillsResult = await toolRunner.run("list_skills", {});
+      const skillsResult = await toolRunner.run("list_skills", {}, { traceParentId: runtimeTraceNodeId });
       const skills = Array.isArray(skillsResult.data)
         ? (skillsResult.data as Array<{ name: string; description: string; directory: string }>)
         : [];
@@ -131,13 +153,15 @@ export class AgentOrchestrator {
         skills,
         llmProvider,
         toolRunner,
-        eventBus
+        eventBus,
+        trace: input.trace,
+        parentTraceId: runtimeTraceNodeId
       });
       runLogger.event("skill.selected", {
         skillName: loadedSkill?.name ?? "none"
       });
 
-      await this.askModelForTodoPlan(input.prompt, loadedSkill, registry, toolRunner, eventBus, llmProvider);
+      await this.askModelForTodoPlan(input.prompt, loadedSkill, registry, toolRunner, eventBus, llmProvider, input.trace, runtimeTraceNodeId);
       const plannedTodos = normalizeTodoPlan(todoManager.getSnapshot());
       runLogger.event("todo.plan.ready", {
         todoCount: plannedTodos.length,
@@ -150,7 +174,7 @@ export class AgentOrchestrator {
           mode: "todo-plan",
           todoCount: plannedTodos.length
         });
-        await toolRunner.run("write_todos", { todos: plannedTodos });
+        await toolRunner.run("write_todos", { todos: plannedTodos }, { traceParentId: runtimeTraceNodeId });
         const finalTodos = await this.executeTodoPlan({
           prompt: input.prompt,
           loadedSkill,
@@ -159,10 +183,21 @@ export class AgentOrchestrator {
           toolRunner,
           eventBus,
           contextManager,
-          llmProvider
+          llmProvider,
+          trace: input.trace,
+          parentTraceId: runtimeTraceNodeId
         });
-        const reply = await this.createFinalReply(input.prompt, loadedSkill, finalTodos, contextManager, llmProvider, runLogger);
+        const reply = await this.createFinalReply(input.prompt, loadedSkill, finalTodos, contextManager, llmProvider, runLogger, input.trace, runtimeTraceNodeId);
         emitFinalEvents(eventBus, reply);
+        await input.trace?.endNode(runtimeTraceNodeId, {
+          status: "success",
+          summary: "Agent runtime completed with a todo plan.",
+          output: {
+            mode: "todo-plan",
+            todos: finalTodos,
+            reply
+          }
+        });
         runSpan.end({
           mode: "todo-plan",
           todoCount: finalTodos.length,
@@ -179,6 +214,8 @@ export class AgentOrchestrator {
         llmProvider,
         toolRunner,
         eventBus,
+        trace: input.trace,
+        parentTraceId: runtimeTraceNodeId,
         allowedTools: executionToolNames,
         requireFinalContent: true,
         llmMessages: [
@@ -190,12 +227,26 @@ export class AgentOrchestrator {
       const reply = directResult.content || "任务已完成。";
 
       emitFinalEvents(eventBus, reply);
+      await input.trace?.endNode(runtimeTraceNodeId, {
+        status: "success",
+        summary: "Agent runtime completed directly.",
+        output: {
+          mode: "direct",
+          reply,
+          messages: directResult.messages
+        }
+      });
       runSpan.end({
         mode: "direct",
         replyChars: reply.length
       });
       return { reply };
     } catch (error) {
+      await input.trace?.endNode(runtimeTraceNodeId, {
+        status: "error",
+        summary: error instanceof Error ? error.message : "Agent runtime failed.",
+        error
+      });
       runSpan.fail(error);
       throw error;
     }
@@ -207,7 +258,9 @@ export class AgentOrchestrator {
     registry: ToolRegistry,
     toolRunner: ToolRunner,
     eventBus: AgentEventBus,
-    llmProvider: NonNullable<AgentRunInput["llmProvider"]>
+    llmProvider: NonNullable<AgentRunInput["llmProvider"]>,
+    trace: AgentRunInput["trace"],
+    parentTraceId: string | undefined
   ) {
     eventBus.runLogger.event("todo.planning.start", {
       hasSkill: Boolean(loadedSkill),
@@ -219,6 +272,8 @@ export class AgentOrchestrator {
       toolRegistry: registry,
       toolRunner,
       eventBus,
+      trace,
+      parentTraceId,
       allowedTools: ["write_todos"],
       maxIterations: 6,
       llmMessages: [
@@ -240,6 +295,8 @@ export class AgentOrchestrator {
     eventBus: AgentEventBus;
     contextManager: ContextManager;
     llmProvider: NonNullable<AgentRunInput["llmProvider"]>;
+    trace: AgentRunInput["trace"];
+    parentTraceId?: string;
   }): Promise<Todo[]> {
     let todos = options.todos;
     const runLogger = options.eventBus.runLogger;
@@ -250,6 +307,24 @@ export class AgentOrchestrator {
     });
 
     for (const [index, todo] of todos.entries()) {
+      const todoTraceNodeId = await options.trace?.startNode({
+        parentId: options.parentTraceId ?? options.trace.rootNodeId,
+        type: "todo",
+        title: todo.title,
+        summary: todo.detail,
+        input: {
+          userRequest: options.prompt,
+          todo,
+          index: index + 1,
+          total: todos.length,
+          sharedSummary: options.contextManager.getSharedSummary()
+        },
+        metadata: {
+          todoId: todo.id,
+          todoIndex: index + 1,
+          todoCount: todos.length
+        }
+      });
       runLogger.event("todo.execute.start", {
         todoId: todo.id,
         todoTitle: todo.title,
@@ -258,7 +333,7 @@ export class AgentOrchestrator {
         sharedSummaryChars: options.contextManager.getSharedSummary().length
       });
       todos = withTodoStatus(todos, todo.id, "in_progress");
-      await options.toolRunner.run("write_todos", { todos });
+      await options.toolRunner.run("write_todos", { todos }, { traceParentId: todoTraceNodeId });
 
       try {
         const result = await runAgentLoop({
@@ -267,6 +342,8 @@ export class AgentOrchestrator {
           toolRegistry: options.registry,
           toolRunner: options.toolRunner,
           eventBus: options.eventBus,
+          trace: options.trace,
+          parentTraceId: todoTraceNodeId,
           allowedTools: executionToolNames,
           requireFinalContent: true,
           allowSyntheticFinalContent: true,
@@ -297,7 +374,16 @@ export class AgentOrchestrator {
           commitCount: options.contextManager.getCommits().length
         });
         todos = withTodoStatus(todos, todo.id, "completed");
-        await options.toolRunner.run("write_todos", { todos });
+        await options.toolRunner.run("write_todos", { todos }, { traceParentId: todoTraceNodeId });
+        await options.trace?.endNode(todoTraceNodeId, {
+          status: "success",
+          summary: result.content || `${todo.title} completed.`,
+          output: {
+            todo: todos.find((item) => item.id === todo.id),
+            result,
+            commits: options.contextManager.getCommits()
+          }
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Todo execution failed.";
         runLogger.event(
@@ -310,7 +396,15 @@ export class AgentOrchestrator {
           "error"
         );
         todos = withTodoStatus(todos, todo.id, "failed", message);
-        await options.toolRunner.run("write_todos", { todos });
+        await options.toolRunner.run("write_todos", { todos }, { traceParentId: todoTraceNodeId });
+        await options.trace?.endNode(todoTraceNodeId, {
+          status: "error",
+          summary: message,
+          error,
+          output: {
+            todo: todos.find((item) => item.id === todo.id)
+          }
+        });
         throw error;
       }
     }
@@ -330,7 +424,9 @@ export class AgentOrchestrator {
     todos: Todo[],
     contextManager: ContextManager,
     llmProvider: NonNullable<AgentRunInput["llmProvider"]>,
-    runLogger: NonNullable<AgentRunInput["runLogger"]>
+    runLogger: NonNullable<AgentRunInput["runLogger"]>,
+    trace: AgentRunInput["trace"],
+    parentTraceId: string | undefined
   ): Promise<string> {
     runLogger.event("final_reply.start", {
       todoCount: todos.length,
@@ -340,6 +436,8 @@ export class AgentOrchestrator {
     const response = await completeWithLogging({
       provider: llmProvider,
       runLogger,
+      trace,
+      traceParentId: parentTraceId,
       phase: "final-reply",
       request: {
         temperature: 0.2,

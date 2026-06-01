@@ -1,4 +1,4 @@
-import { Bot, Check, MessageSquarePlus, Moon, Search, Settings2, Sun, X } from "lucide-react";
+import { Activity, Bot, Check, MessageSquarePlus, Moon, Search, Settings2, Sun, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import type { ThemeMode } from "../lib/theme";
@@ -81,6 +81,12 @@ export function SessionSidebar({
         >
           <Settings2 className="size-4" />
           设置
+        </Button>
+        <Button asChild className="mt-2 w-full justify-start" variant="ghost">
+          <a href="/debug/runs">
+            <Activity className="size-4" />
+            运行日志
+          </a>
         </Button>
       </div>
     </aside>

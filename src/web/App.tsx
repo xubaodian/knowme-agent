@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Artifact, Run, RunEvent, RunEventType } from "../shared/types";
 import { createChat, listChats, listMessages, sendMessage } from "./api/client";
 import { AgentStream } from "./components/agent-stream";
+import { DebugRunsPage } from "./components/debug-runs-page";
 import { NewTaskComposer } from "./components/new-task-composer";
 import { SandboxPanel } from "./components/sandbox-panel";
 import { SessionSidebar } from "./components/session-sidebar";
@@ -47,6 +48,15 @@ export function App() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
+  const [pathname, setPathname] = useState(() => (typeof window === "undefined" ? "/" : window.location.pathname));
+
+  useEffect(() => {
+    const handlePopState = () => setPathname(window.location.pathname);
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const chatsQuery = useQuery({
     queryKey: ["chats"],
@@ -186,6 +196,10 @@ export function App() {
 
       return current.map((artifact, index) => (index === existingIndex ? nextArtifact : artifact));
     });
+  }
+
+  if (pathname.startsWith("/debug/runs")) {
+    return <DebugRunsPage theme={theme} />;
   }
 
   return (

@@ -5,6 +5,8 @@ import type {
   CreateChatResponse,
   ListLlmModelsResponse,
   Run,
+  RunTraceDetail,
+  RunTraceSummary,
   SendMessageResponse
 } from "../../shared/types";
 
@@ -63,4 +65,18 @@ export async function getRun(runId: string): Promise<Run> {
 export async function listRunArtifacts(runId: string): Promise<Artifact[]> {
   const payload = await request<{ artifacts: Artifact[] }>(`/api/runs/${runId}/artifacts`);
   return payload.artifacts;
+}
+
+export async function listDebugRuns(): Promise<RunTraceSummary[]> {
+  const payload = await request<{ runs: RunTraceSummary[] }>("/api/debug/runs");
+  return payload.runs;
+}
+
+export async function getDebugRunTrace(runId: string): Promise<RunTraceDetail> {
+  return request<RunTraceDetail>(`/api/debug/runs/${runId}`);
+}
+
+export async function getDebugTraceNodePayload(runId: string, nodeId: string, kind: "input" | "output" | "error"): Promise<unknown> {
+  const payload = await request<{ payload: unknown }>(`/api/debug/runs/${runId}/nodes/${nodeId}/${kind}`);
+  return payload.payload;
 }

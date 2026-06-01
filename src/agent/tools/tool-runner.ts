@@ -1,15 +1,38 @@
 import type { AgentTool, ToolExecutionContext, ToolRunResult } from "../types.js";
 import type { ToolRegistry } from "./tool-registry.js";
 
+export type ToolRunOptions = {
+  traceParentId?: string;
+  traceMetadata?: Record<string, unknown>;
+};
+
 export class ToolRunner {
   constructor(
     private readonly registry: ToolRegistry,
     private readonly context: ToolExecutionContext
   ) {}
 
-  async run<TInput, TOutput extends ToolRunResult = ToolRunResult>(name: string, input: TInput): Promise<TOutput> {
+  async run<TInput, TOutput extends ToolRunResult = ToolRunResult>(
+    name: string,
+    input: TInput,
+    options: ToolRunOptions = {}
+  ): Promise<TOutput> {
     const tool = this.registry.get(name) as unknown as AgentTool<TInput, TOutput>;
     const inputSummary = tool.summarizeInput?.(input) ?? "执行工具调用。";
+    const traceNodeId = await this.context.trace?.startNode({
+      parentId: options.traceParentId ?? this.context.trace.rootNodeId,
+      type: "tool",
+      title: tool.name,
+      summary: inputSummary,
+      input: {
+        toolName: tool.name,
+        arguments: input
+      },
+      metadata: {
+        toolName: tool.name,
+        ...options.traceMetadata
+      }
+    });
     const span = this.context.runLogger.startSpan("tool.run", {
       toolName: tool.name,
       inputSummary,
@@ -35,6 +58,16 @@ export class ToolRunner {
         outputDataKind: describeDataKind(output.data),
         outputDataKeys: describeDataKeys(output.data)
       });
+      await this.context.trace?.endNode(traceNodeId, {
+        status: "success",
+        summary: outputSummary,
+        output,
+        metadata: {
+          toolName: tool.name,
+          hasData: output.data !== undefined,
+          outputDataKind: describeDataKind(output.data)
+        }
+      });
 
       this.context.eventBus.emit({
         type: "tool.finished",
@@ -51,6 +84,14 @@ export class ToolRunner {
       span.fail(error, {
         toolName: tool.name,
         inputSize: estimateJsonSize(input)
+      });
+      await this.context.trace?.endNode(traceNodeId, {
+        status: "error",
+        summary: message,
+        error,
+        metadata: {
+          toolName: tool.name
+        }
       });
 
       this.context.eventBus.emit({

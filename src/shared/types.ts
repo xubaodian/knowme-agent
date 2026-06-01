@@ -221,3 +221,45 @@ export type SendMessageResponse = {
   message: ChatMessage;
   run: Run;
 };
+
+export type RunTraceNodeType = "run" | "phase" | "llm" | "tool" | "todo" | "artifact" | "event" | "error";
+
+export type RunTraceNodeStatus = "pending" | "running" | "success" | "error" | "skipped";
+
+export type RunTraceSummary = {
+  runId: string;
+  folderName: string;
+  status: RunTraceNodeStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  chatId?: string;
+  userMessageId?: string;
+  model?: string;
+  promptSummary?: string;
+  nodeCount?: number;
+  durationMs?: number;
+};
+
+export type RunTraceNode = {
+  id: string;
+  runId: string;
+  parentId?: string;
+  type: RunTraceNodeType;
+  status: RunTraceNodeStatus;
+  title: string;
+  summary?: string;
+  sequence: number;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  inputRef?: string;
+  outputRef?: string;
+  errorRef?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type RunTraceDetail = {
+  run: RunTraceSummary;
+  nodes: RunTraceNode[];
+};

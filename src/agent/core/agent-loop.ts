@@ -1,5 +1,6 @@
 import type { LlmMessage, LlmProvider, LlmToolDefinition } from "../llm/types.js";
 import { completeWithLogging } from "../llm/llm-runner.js";
+import type { RunTraceRecorder } from "../../logging/trace.js";
 import { buildEmptyResponseRecoveryPrompt, buildToolFailureRecoveryPrompt } from "../prompts/index.js";
 import type { AgentTool } from "../types.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
@@ -13,6 +14,8 @@ export type AgentLoopOptions = {
   toolRunner: ToolRunner;
   llmProvider: LlmProvider;
   eventBus: AgentEventBus;
+  trace?: RunTraceRecorder;
+  parentTraceId?: string;
   allowedTools?: string[];
   maxIterations?: number;
   requireFinalContent?: boolean;
@@ -55,214 +58,280 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     toolCount: toolDefinitions.length,
     toolNames: toolDefinitions.map((tool) => tool.name)
   });
-
-  for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
-    runLogger.event("agent.loop.iteration.start", {
+  const loopTraceNodeId = await options.trace?.startNode({
+    parentId: options.parentTraceId ?? options.trace.rootNodeId,
+    type: "phase",
+    title: options.name,
+    summary: `Agent loop with ${toolDefinitions.length} tool(s).`,
+    input: {
       phase: options.name,
-      iteration,
-      messageCount: messages.length,
+      maxIterations,
+      messages,
+      allowedTools: options.allowedTools,
+      tools: toolDefinitions
+    },
+    metadata: {
+      phase: options.name,
       toolCount: toolDefinitions.length
-    });
-    options.eventBus.emit({
-      type: "thought.created",
-      title: `${options.name} thinking`,
-      detail: `第 ${iteration} 轮模型决策。`,
-      status: "running",
-      flowKind: "thought",
-      visibility: "debug"
-    });
+    }
+  });
 
-    const response = await completeWithLogging({
-      provider: options.llmProvider,
-      runLogger: options.eventBus.runLogger,
-      phase: options.name,
-      iteration,
-      request: {
-        messages,
-        tools: toolDefinitions,
-        toolChoice: toolDefinitions.length > 0 ? "auto" : "none",
-        temperature: 0.2
-      }
-    });
-    const toolCalls = response.toolCalls ?? [];
+  try {
+    for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      runLogger.event("agent.loop.iteration.start", {
+        phase: options.name,
+        iteration,
+        messageCount: messages.length,
+        toolCount: toolDefinitions.length
+      });
+      options.eventBus.emit({
+        type: "thought.created",
+        title: `${options.name} thinking`,
+        detail: `第 ${iteration} 轮模型决策。`,
+        status: "running",
+        flowKind: "thought",
+        visibility: "debug"
+      });
 
-    runLogger.event("agent.loop.iteration.response", {
-      phase: options.name,
-      iteration,
-      finishReason: response.finishReason,
-      contentChars: response.content.length,
-      toolCallCount: toolCalls.length,
-      toolCallNames: toolCalls.map((toolCall) => toolCall.name)
-    });
+      const response = await completeWithLogging({
+        provider: options.llmProvider,
+        runLogger: options.eventBus.runLogger,
+        trace: options.trace,
+        traceParentId: loopTraceNodeId,
+        phase: options.name,
+        iteration,
+        request: {
+          messages,
+          tools: toolDefinitions,
+          toolChoice: toolDefinitions.length > 0 ? "auto" : "none",
+          temperature: 0.2
+        }
+      });
+      const toolCalls = response.toolCalls ?? [];
 
-    if (toolCalls.length === 0) {
-      const content = response.content.trim();
+      runLogger.event("agent.loop.iteration.response", {
+        phase: options.name,
+        iteration,
+        finishReason: response.finishReason,
+        contentChars: response.content.length,
+        toolCallCount: toolCalls.length,
+        toolCallNames: toolCalls.map((toolCall) => toolCall.name)
+      });
 
-      if (lastToolFailure) {
-        if (recoveryPromptCount < maxRecoveryPrompts) {
-          recoveryPromptCount += 1;
+      if (toolCalls.length === 0) {
+        const content = response.content.trim();
+
+        if (lastToolFailure) {
+          if (recoveryPromptCount < maxRecoveryPrompts) {
+            recoveryPromptCount += 1;
+            runLogger.event(
+              "agent.loop.recover_after_tool_failure",
+              {
+                phase: options.name,
+                iteration,
+                toolName: lastToolFailure.name,
+                error: lastToolFailure.error,
+                recoveryPromptCount
+              },
+              "warn"
+            );
+            messages.push({
+              role: "user",
+              content: buildToolFailureRecoveryPrompt(lastToolFailure.name, lastToolFailure.error)
+            });
+            continue;
+          }
+
           runLogger.event(
-            "agent.loop.recover_after_tool_failure",
+            "agent.loop.end_after_tool_failure",
             {
               phase: options.name,
               iteration,
               toolName: lastToolFailure.name,
-              error: lastToolFailure.error,
-              recoveryPromptCount
+              error: lastToolFailure.error
             },
             "warn"
           );
-          messages.push({
-            role: "user",
-            content: buildToolFailureRecoveryPrompt(lastToolFailure.name, lastToolFailure.error)
-          });
-          continue;
+          throw new Error(`${options.name} stopped after failed tool call ${lastToolFailure.name}: ${lastToolFailure.error}`);
         }
 
-        runLogger.event(
-          "agent.loop.end_after_tool_failure",
-          {
-            phase: options.name,
-            iteration,
-            toolName: lastToolFailure.name,
-            error: lastToolFailure.error
-          },
-          "warn"
-        );
-        throw new Error(`${options.name} stopped after failed tool call ${lastToolFailure.name}: ${lastToolFailure.error}`);
-      }
+        if (options.requireFinalContent && !content) {
+          if (recoveryPromptCount < maxRecoveryPrompts) {
+            recoveryPromptCount += 1;
+            runLogger.event(
+              "agent.loop.recover_empty_final_content",
+              {
+                phase: options.name,
+                iteration,
+                requireFinalContent: true,
+                recoveryPromptCount
+              },
+              "warn"
+            );
+            messages.push({
+              role: "user",
+              content: buildEmptyResponseRecoveryPrompt()
+            });
+            continue;
+          }
 
-      if (options.requireFinalContent && !content) {
-        if (recoveryPromptCount < maxRecoveryPrompts) {
-          recoveryPromptCount += 1;
+          if (options.allowSyntheticFinalContent && successfulToolSummaries.length > 0) {
+            const syntheticContent = `Tool-only completion. Recent tool results: ${successfulToolSummaries.slice(-6).join(" | ")}`;
+            runLogger.event(
+              "agent.loop.synthetic_final_content",
+              {
+                phase: options.name,
+                iteration,
+                summary: syntheticContent
+              },
+              "warn"
+            );
+            await options.trace?.endNode(loopTraceNodeId, {
+              status: "success",
+              summary: syntheticContent,
+              output: {
+                reason: "synthetic_final_content",
+                content: syntheticContent,
+                messages,
+                failedToolCallCount
+              }
+            });
+
+            return {
+              content: syntheticContent,
+              messages: [
+                ...messages,
+                {
+                  role: "assistant",
+                  content: syntheticContent
+                }
+              ],
+              failedToolCallCount
+            };
+          }
+
           runLogger.event(
-            "agent.loop.recover_empty_final_content",
+            "agent.loop.empty_final_content",
             {
               phase: options.name,
               iteration,
-              requireFinalContent: true,
-              recoveryPromptCount
+              requireFinalContent: true
             },
             "warn"
           );
-          messages.push({
-            role: "user",
-            content: buildEmptyResponseRecoveryPrompt()
-          });
-          continue;
+          throw new Error(`${options.name} stopped without a completion summary.`);
         }
 
-        if (options.allowSyntheticFinalContent && successfulToolSummaries.length > 0) {
-          const syntheticContent = `Tool-only completion. Recent tool results: ${successfulToolSummaries.slice(-6).join(" | ")}`;
-          runLogger.event(
-            "agent.loop.synthetic_final_content",
-            {
-              phase: options.name,
-              iteration,
-              summary: syntheticContent
-            },
-            "warn"
-          );
-
-          return {
-            content: syntheticContent,
+        runLogger.event("agent.loop.end", {
+          phase: options.name,
+          iteration,
+          reason: "assistant_response",
+          contentChars: content.length,
+          finalMessageCount: messages.length + 1
+        });
+        await options.trace?.endNode(loopTraceNodeId, {
+          status: "success",
+          summary: content,
+          output: {
+            reason: "assistant_response",
+            content,
             messages: [
               ...messages,
               {
                 role: "assistant",
-                content: syntheticContent
+                content: response.content
               }
             ],
             failedToolCallCount
-          };
-        }
-
-        runLogger.event(
-          "agent.loop.empty_final_content",
-          {
-            phase: options.name,
-            iteration,
-            requireFinalContent: true
-          },
-          "warn"
-        );
-        throw new Error(`${options.name} stopped without a completion summary.`);
-      }
-
-      runLogger.event("agent.loop.end", {
-        phase: options.name,
-        iteration,
-        reason: "assistant_response",
-        contentChars: content.length,
-        finalMessageCount: messages.length + 1
-      });
-      return {
-        content,
-        messages: [
-          ...messages,
-          {
-            role: "assistant",
-            content: response.content
           }
-        ],
-        failedToolCallCount
-      };
-    }
-
-    messages.push({
-      role: "assistant",
-      content: response.content,
-      toolCalls
-    });
-
-    for (const toolCall of toolCalls) {
-      runLogger.event("agent.loop.tool_call.requested", {
-        phase: options.name,
-        iteration,
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        argumentChars: toolCall.arguments.length
-      });
-      const toolResult = await executeToolCall(options.toolRunner, toolCall.name, toolCall.arguments);
-      if (toolResult.ok) {
-        lastToolFailure = undefined;
-        successfulToolSummaries.push(`${toolCall.name}: ${toolResult.summary ?? "ok"}`);
-      } else {
-        failedToolCallCount += 1;
-        lastToolFailure = {
-          name: toolCall.name,
-          error: toolResult.error
+        });
+        return {
+          content,
+          messages: [
+            ...messages,
+            {
+              role: "assistant",
+              content: response.content
+            }
+          ],
+          failedToolCallCount
         };
       }
-      runLogger.event(toolResult.ok ? "agent.loop.tool_call.completed" : "agent.loop.tool_call.failed", {
-        phase: options.name,
-        iteration,
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        ok: toolResult.ok,
-        summary: toolResult.ok ? toolResult.summary : undefined,
-        error: toolResult.ok ? undefined : toolResult.error
-      }, toolResult.ok ? "info" : "warn");
 
       messages.push({
-        role: "tool",
-        toolCallId: toolCall.id,
-        name: toolCall.name,
-        content: serializeToolResult(toolResult)
+        role: "assistant",
+        content: response.content,
+        toolCalls
       });
-    }
-  }
 
-  runLogger.event(
-    "agent.loop.max_iterations",
-    {
-      phase: options.name,
-      maxIterations,
-      messageCount: messages.length
-    },
-    "warn"
-  );
-  throw new Error(`${options.name} exceeded ${maxIterations} LLM/tool iterations.`);
+      for (const toolCall of toolCalls) {
+        runLogger.event("agent.loop.tool_call.requested", {
+          phase: options.name,
+          iteration,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          argumentChars: toolCall.arguments.length
+        });
+        const toolResult = await executeToolCall(options.toolRunner, toolCall.name, toolCall.arguments, {
+          traceParentId: loopTraceNodeId,
+          traceMetadata: {
+            phase: options.name,
+            iteration,
+            toolCallId: toolCall.id
+          }
+        });
+        if (toolResult.ok) {
+          lastToolFailure = undefined;
+          successfulToolSummaries.push(`${toolCall.name}: ${toolResult.summary ?? "ok"}`);
+        } else {
+          failedToolCallCount += 1;
+          lastToolFailure = {
+            name: toolCall.name,
+            error: toolResult.error
+          };
+        }
+        runLogger.event(toolResult.ok ? "agent.loop.tool_call.completed" : "agent.loop.tool_call.failed", {
+          phase: options.name,
+          iteration,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          ok: toolResult.ok,
+          summary: toolResult.ok ? toolResult.summary : undefined,
+          error: toolResult.ok ? undefined : toolResult.error
+        }, toolResult.ok ? "info" : "warn");
+
+        messages.push({
+          role: "tool",
+          toolCallId: toolCall.id,
+          name: toolCall.name,
+          content: serializeToolResult(toolResult)
+        });
+      }
+    }
+
+    runLogger.event(
+      "agent.loop.max_iterations",
+      {
+        phase: options.name,
+        maxIterations,
+        messageCount: messages.length
+      },
+      "warn"
+    );
+    throw new Error(`${options.name} exceeded ${maxIterations} LLM/tool iterations.`);
+  } catch (error) {
+    await options.trace?.endNode(loopTraceNodeId, {
+      status: "error",
+      summary: error instanceof Error ? error.message : "Agent loop failed.",
+      error,
+      output: {
+        messages,
+        failedToolCallCount,
+        successfulToolSummaries
+      }
+    });
+    throw error;
+  }
 }
 
 function selectTools(tools: AgentTool[], allowedTools?: string[]): AgentTool[] {
@@ -286,10 +355,18 @@ function toLlmToolDefinitions(tools: AgentTool[]): LlmToolDefinition[] {
   }));
 }
 
-async function executeToolCall(toolRunner: ToolRunner, name: string, rawArguments: string): Promise<ToolCallExecutionResult> {
+async function executeToolCall(
+  toolRunner: ToolRunner,
+  name: string,
+  rawArguments: string,
+  options: {
+    traceParentId?: string;
+    traceMetadata?: Record<string, unknown>;
+  } = {}
+): Promise<ToolCallExecutionResult> {
   try {
     const input = parseToolArguments(rawArguments);
-    const output = await toolRunner.run(name, input);
+    const output = await toolRunner.run(name, input, options);
 
     return {
       ok: true,

@@ -3,6 +3,7 @@ import path from "node:path";
 import { RunController } from "../../agent/index.js";
 import { createLlmProviderFromEnv } from "../../agent/llm/index.js";
 import { createRunLogger, getLogger, readLocalLogs } from "../../logging/index.js";
+import { createRunTraceRecorder } from "../../logging/trace.js";
 import type { Artifact, Run, RunEvent } from "../../shared/types.js";
 
 type CreateRunOptions = {
@@ -86,6 +87,11 @@ async function executeRun(run: Run, options: CreateRunOptions) {
     workspaceRoot: process.cwd(),
     skillsRoot: path.join(process.cwd(), "agent", "skills")
   });
+  const trace = await createRunTraceRecorder({
+    run,
+    prompt: options.prompt,
+    model: options.model
+  });
 
   try {
     const result = await runController.execute({
@@ -102,6 +108,7 @@ async function executeRun(run: Run, options: CreateRunOptions) {
       workspaceRoot: process.cwd(),
       skillsRoot: path.join(process.cwd(), "agent", "skills"),
       runLogger,
+      trace,
       onEvent: (event) => {
         if (event.type === "run.started") {
           updateRun(run.id, "running");
@@ -125,6 +132,12 @@ async function executeRun(run: Run, options: CreateRunOptions) {
     updateRun(run.id, "completed");
     runLogger.event("run.completed", {
       replyChars: result.reply.length,
+      artifactCount: artifactsByRun.get(run.id)?.length ?? 0,
+      eventCount: eventsByRun.get(run.id)?.length ?? 0
+    });
+    await trace.finish("success", {
+      reply: result.reply,
+      run: getRun(run.id),
       artifactCount: artifactsByRun.get(run.id)?.length ?? 0,
       eventCount: eventsByRun.get(run.id)?.length ?? 0
     });
@@ -155,6 +168,14 @@ async function executeRun(run: Run, options: CreateRunOptions) {
     span.fail(error, {
       eventCount: eventsByRun.get(run.id)?.length ?? 0
     });
+    await trace.finish(
+      "error",
+      {
+        run: getRun(run.id),
+        eventCount: eventsByRun.get(run.id)?.length ?? 0
+      },
+      error
+    );
     pushServiceEvent(run.id, run.chatId, {
       type: "run.failed",
       title: "Run failed",
