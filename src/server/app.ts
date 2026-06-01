@@ -3,15 +3,19 @@ import { cors } from "hono/cors";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { healthRoutes } from "./routes/health.js";
 import { chatRoutes } from "./routes/chats.js";
+import { llmRoutes } from "./routes/llm.js";
 import { runRoutes } from "./routes/runs.js";
+import { requestLogging } from "./middleware/request-logging.js";
 
 export function createApp() {
   const app = new Hono();
 
   app.use("/api/*", cors());
+  app.use("/api/*", requestLogging());
 
   app.route("/api/health", healthRoutes);
   app.route("/api/chats", chatRoutes);
+  app.route("/api/llm", llmRoutes);
   app.route("/api/runs", runRoutes);
 
   app.get("/api", (c) =>

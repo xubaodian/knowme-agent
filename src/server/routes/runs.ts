@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { getRun, getRunArtifacts, getRunEvents, subscribeRunEvents } from "../services/run-service.js";
+import { getRun, getRunArtifacts, getRunEvents, getRunLogs, subscribeRunEvents } from "../services/run-service.js";
 
 export const runRoutes = new Hono();
 
@@ -70,4 +70,15 @@ runRoutes.get("/:runId/artifacts", (c) => {
   }
 
   return c.json({ artifacts: getRunArtifacts(runId) });
+});
+
+runRoutes.get("/:runId/logs", async (c) => {
+  const runId = c.req.param("runId");
+  const run = getRun(runId);
+
+  if (!run) {
+    return c.json({ error: "Run not found" }, 404);
+  }
+
+  return c.json({ logs: await getRunLogs(runId) });
 });

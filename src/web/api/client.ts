@@ -1,4 +1,12 @@
-import type { Artifact, ChatMessage, ChatSession, CreateChatResponse, Run, SendMessageResponse } from "../../shared/types";
+import type {
+  Artifact,
+  ChatMessage,
+  ChatSession,
+  CreateChatResponse,
+  ListLlmModelsResponse,
+  Run,
+  SendMessageResponse
+} from "../../shared/types";
 
 async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
@@ -36,11 +44,15 @@ export async function listMessages(chatId: string): Promise<ChatMessage[]> {
   return payload.messages;
 }
 
-export async function sendMessage(chatId: string, content: string): Promise<SendMessageResponse> {
+export async function sendMessage(chatId: string, content: string, model?: string): Promise<SendMessageResponse> {
   return request<SendMessageResponse>(`/api/chats/${chatId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content })
+    body: JSON.stringify({ content, model })
   });
+}
+
+export async function listLlmModels(): Promise<ListLlmModelsResponse> {
+  return request<ListLlmModelsResponse>("/api/llm/models");
 }
 
 export async function getRun(runId: string): Promise<Run> {

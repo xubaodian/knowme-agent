@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isKnownLlmModel } from "../../agent/llm/index.js";
 import { addAssistantMessage, addUserMessage, createChat, getMessages, listChats } from "../services/chat-service.js";
 import { createRun } from "../services/run-service.js";
 
@@ -26,9 +27,15 @@ chatRoutes.post("/:chatId/messages", async (c) => {
   const chatId = c.req.param("chatId");
   const body = await c.req.json().catch(() => null);
   const content = typeof body?.content === "string" ? body.content.trim() : "";
+  const requestedModel = typeof body?.model === "string" ? body.model.trim() : "";
+  const model = requestedModel || undefined;
 
   if (!content) {
     return c.json({ error: "Message content is required" }, 400);
+  }
+
+  if (model && !isKnownLlmModel(model, "openrouter")) {
+    return c.json({ error: "Unknown OpenRouter model" }, 400);
   }
 
   const message = addUserMessage(chatId, content);
@@ -39,6 +46,7 @@ chatRoutes.post("/:chatId/messages", async (c) => {
 
   const run = createRun({
     chatId,
+    model,
     userMessageId: message.id,
     prompt: content,
     onComplete: (reply, runId) => {

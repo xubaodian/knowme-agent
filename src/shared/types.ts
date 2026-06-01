@@ -23,9 +23,25 @@ export type Run = {
   chatId: string;
   userMessageId: string;
   status: RunStatus;
+  model?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+};
+
+export type LlmModelOption = {
+  provider: string;
+  id: string;
+  label: string;
+  description?: string;
+};
+
+export type ListLlmModelsResponse = {
+  provider: string;
+  configured: boolean;
+  currentModel: string;
+  defaultModel: string;
+  models: LlmModelOption[];
 };
 
 export type RunEventType =
