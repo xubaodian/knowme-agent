@@ -21,19 +21,20 @@ Use this skill when the user asks to turn provided materials, notes, data, docum
    - Use the user's explicit preference if given.
    - Otherwise choose the theme that best matches the material, audience, and report intent.
    - Default to `executive-light` when no theme signal is clear.
-   - Read `references/themes.md` before implementation and apply the selected theme as a full design system: background, colors, typography scale, spacing, surfaces, chart palette, icon style, and validation checklist.
+   - Use `read_skill_file` to read `references/themes.md` before implementation and apply the selected theme as a full design system: background, colors, typography scale, spacing, surfaces, chart palette, icon style, and validation checklist.
 
 3. Implement a self-contained HTML file.
-   - Use sandbox file tools to create the report, normally under `outputs/html-report/index.html`.
+   - Use `write_file` to create the report, normally under `outputs/html-report/index.html`; `write_file` creates parent directories, so shell setup is usually unnecessary.
    - Keep CSS and JavaScript inline unless there is a clear reason to split files.
-   - Read `references/dependencies.md` and use the exact CDN URLs listed there for Chart.js and Font Awesome.
+   - Use `read_skill_file` to read `references/dependencies.md` and use the exact CDN URLs listed there for Chart.js and Font Awesome.
    - Use Chart.js for charts and Font Awesome for icons when charts or icons help the report.
    - For other external network dependencies, avoid them unless the user explicitly provided or requested them.
    - Make the layout responsive for desktop and mobile.
    - Use semantic HTML, accessible color contrast, readable typography, and clear visual hierarchy.
 
 4. Validate visually with browser tools.
-   - Navigate to the generated HTML.
+   - Use `browser_open_file` to open the generated HTML file directly from the sandbox path.
+   - Do not start a local HTTP server for preview unless a future runtime explicitly provides a dedicated long-running process tool.
    - Take at least one screenshot.
    - Inspect for blank renders, broken assets, failed Chart.js or Font Awesome loading, overflow, clipped text, overlapping UI, weak contrast, excessive borders, old-fashioned styling, and poor mobile behavior.
    - If the screenshot reveals issues, patch the HTML/CSS and take another screenshot. Iterate until the report looks production-quality.

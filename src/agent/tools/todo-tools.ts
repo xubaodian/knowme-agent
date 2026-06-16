@@ -15,12 +15,17 @@ export function createTodoTools(): AgentTool[] {
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["id", "title", "status"],
+              required: ["id", "title", "description", "expectedOutput", "status"],
               properties: {
                 id: { type: "string", description: "Stable kebab-case todo id." },
-                title: { type: "string" },
-                detail: { type: "string" },
-                status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] }
+                title: { type: "string", description: "Short todo name." },
+                description: { type: "string", description: "What this todo should do and why it exists." },
+                expectedOutput: { type: "string", description: "Concrete observable output expected from this todo." },
+                detail: { type: "string", description: "Optional legacy detail or failure detail." },
+                status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] },
+                outputSummary: { type: "string" },
+                artifactRefs: { type: "array", items: { type: "string" } },
+                sandboxRefs: { type: "array", items: { type: "string" } }
               }
             }
           }
@@ -51,7 +56,7 @@ function summarizeTodos(input: WriteTodosInput) {
   }, {});
   const preview = input.todos
     .slice(0, 6)
-    .map((todo) => `${todo.status}: ${todo.title}`)
+    .map((todo) => `${todo.status}: ${todo.title} -> ${todo.expectedOutput}`)
     .join("；");
 
   return `写入 ${input.todos.length} 个 todo（${JSON.stringify(statusCounts)}）：${preview}`;

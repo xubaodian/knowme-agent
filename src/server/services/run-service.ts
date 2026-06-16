@@ -5,10 +5,13 @@ import { createLlmProviderFromEnv } from "../../agent/llm/index.js";
 import { createRunLogger, getLogger, readLocalLogs } from "../../logging/index.js";
 import { createRunTraceRecorder } from "../../logging/trace.js";
 import type { Artifact, Run, RunEvent } from "../../shared/types.js";
+import { getSkillRegistry } from "./skill-service.js";
+import { loadAppState, updateAppState } from "./local-state-store.js";
 
 type CreateRunOptions = {
   chatId: string;
   model?: string;
+  skillName: string;
   userMessageId: string;
   prompt: string;
   onComplete?: (reply: string, runId: string) => void;
@@ -24,6 +27,8 @@ const logger = getLogger();
 const now = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
+hydrateRuns();
+
 export function createRun(options: CreateRunOptions): Run {
   const timestamp = now();
   const run: Run = {
@@ -31,6 +36,7 @@ export function createRun(options: CreateRunOptions): Run {
     chatId: options.chatId,
     userMessageId: options.userMessageId,
     model: options.model,
+    skillName: options.skillName,
     status: "queued",
     createdAt: timestamp,
     updatedAt: timestamp
@@ -39,12 +45,14 @@ export function createRun(options: CreateRunOptions): Run {
   runs.set(run.id, run);
   eventsByRun.set(run.id, []);
   artifactsByRun.set(run.id, []);
+  persistRuns();
   logger.info("run.queued", {
     category: "run",
     runId: run.id,
     chatId: run.chatId,
     userMessageId: run.userMessageId,
     model: run.model,
+    skillName: run.skillName,
     promptLength: options.prompt.length
   });
   void executeRun(run, options);
@@ -56,12 +64,18 @@ export function getRun(runId: string): Run | undefined {
   return runs.get(runId);
 }
 
+export function getLatestRunForChat(chatId: string): Run | undefined {
+  return [...runs.values()]
+    .filter((run) => run.chatId === chatId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
 export function getRunEvents(runId: string): RunEvent[] {
-  return [...(eventsByRun.get(runId) ?? [])];
+  return (eventsByRun.get(runId) ?? []).map((event) => ({ ...event }));
 }
 
 export function getRunArtifacts(runId: string): Artifact[] {
-  return [...(artifactsByRun.get(runId) ?? [])];
+  return (artifactsByRun.get(runId) ?? []).map((artifact) => ({ ...artifact }));
 }
 
 export async function getRunLogs(runId: string) {
@@ -85,17 +99,21 @@ async function executeRun(run: Run, options: CreateRunOptions) {
   );
   const span = runLogger.startSpan("run.execute", {
     workspaceRoot: process.cwd(),
-    skillsRoot: path.join(process.cwd(), "agent", "skills")
+    skillsRoot: path.join(process.cwd(), "agent", "skills"),
+    skillName: run.skillName
   });
   const trace = await createRunTraceRecorder({
     run,
     prompt: options.prompt,
-    model: options.model
+    model: options.model,
+    skillName: run.skillName
   });
 
   try {
+    const loadedSkill = await getSkillRegistry().loadSkill(run.skillName);
     const result = await runController.execute({
       run,
+      loadedSkill,
       llmProvider: createLlmProviderFromEnv(
         options.model
           ? {
@@ -119,6 +137,7 @@ async function executeRun(run: Run, options: CreateRunOptions) {
       onArtifact: (artifact) => {
         const artifacts = artifactsByRun.get(run.id);
         artifacts?.push(artifact);
+        persistRuns();
         runLogger.event("artifact.stored", {
           artifactId: artifact.id,
           artifactKind: artifact.kind,
@@ -195,6 +214,7 @@ function pushRuntimeEvent(event: RunEvent) {
   }
 
   events.push(event);
+  persistRuns();
   emitter.emit(eventChannel(event.runId), event);
 }
 
@@ -219,6 +239,7 @@ function pushServiceEvent(
   };
 
   events.push(event);
+  persistRuns();
   emitter.emit(eventChannel(runId), event);
 }
 
@@ -235,8 +256,86 @@ function updateRun(runId: string, status: Run["status"]) {
   if (status === "completed" || status === "failed") {
     run.completedAt = run.updatedAt;
   }
+
+  persistRuns();
 }
 
 function eventChannel(runId: string) {
   return `run:${runId}`;
+}
+
+function hydrateRuns(): void {
+  const state = loadAppState();
+  let changed = false;
+
+  for (const storedRun of state.runs) {
+    const run = { ...storedRun };
+
+    if (run.status === "queued" || run.status === "running") {
+      run.status = "failed";
+      run.updatedAt = now();
+      run.completedAt = run.updatedAt;
+      changed = true;
+    }
+
+    runs.set(run.id, run);
+  }
+
+  for (const [runId, events] of Object.entries(state.eventsByRun)) {
+    const run = runs.get(runId);
+    const nextEvents = events.map((event) => ({ ...event }));
+
+    if (run?.status === "failed" && !nextEvents.some((event) => event.type === "run.failed")) {
+      nextEvents.push({
+        id: createId("evt"),
+        runId,
+        chatId: run.chatId,
+        createdAt: run.updatedAt,
+        sequence: nextEvents.length + 1,
+        type: "run.failed",
+        title: "Run interrupted",
+        detail: "服务重启后，之前未完成的 run 已标记为中断。",
+        status: "failed",
+        flowKind: "error",
+        visibility: "primary"
+      });
+      changed = true;
+    }
+
+    eventsByRun.set(runId, nextEvents);
+  }
+
+  for (const [runId, artifacts] of Object.entries(state.artifactsByRun)) {
+    artifactsByRun.set(
+      runId,
+      artifacts.map((artifact) => ({ ...artifact }))
+    );
+  }
+
+  for (const runId of runs.keys()) {
+    eventsByRun.set(runId, eventsByRun.get(runId) ?? []);
+    artifactsByRun.set(runId, artifactsByRun.get(runId) ?? []);
+  }
+
+  if (changed) {
+    persistRuns();
+  }
+}
+
+function persistRuns(): void {
+  updateAppState((state) => {
+    state.runs = [...runs.values()].map((run) => ({ ...run }));
+    state.eventsByRun = Object.fromEntries(
+      [...eventsByRun.entries()].map(([runId, events]) => [
+        runId,
+        events.map((event) => ({ ...event }))
+      ])
+    );
+    state.artifactsByRun = Object.fromEntries(
+      [...artifactsByRun.entries()].map(([runId, artifacts]) => [
+        runId,
+        artifacts.map((artifact) => ({ ...artifact }))
+      ])
+    );
+  });
 }

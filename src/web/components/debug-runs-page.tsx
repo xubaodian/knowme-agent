@@ -456,7 +456,11 @@ function statusClass(status: RunTraceSummary["status"]): string {
 }
 
 function formatRunTitle(run: RunTraceSummary): string {
-  return run.model ? `${run.model}` : run.runId;
+  if (run.skillName && run.model) {
+    return `${run.skillName} / ${run.model}`;
+  }
+
+  return run.skillName ?? run.model ?? run.runId;
 }
 
 function formatDateTime(value: string): string {

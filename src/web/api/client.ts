@@ -4,6 +4,7 @@ import type {
   ChatSession,
   CreateChatResponse,
   ListLlmModelsResponse,
+  ListSkillsResponse,
   Run,
   RunTraceDetail,
   RunTraceSummary,
@@ -46,15 +47,24 @@ export async function listMessages(chatId: string): Promise<ChatMessage[]> {
   return payload.messages;
 }
 
-export async function sendMessage(chatId: string, content: string, model?: string): Promise<SendMessageResponse> {
+export async function getLatestRunForChat(chatId: string): Promise<Run | undefined> {
+  const payload = await request<{ run: Run | null }>(`/api/chats/${chatId}/latest-run`);
+  return payload.run ?? undefined;
+}
+
+export async function sendMessage(chatId: string, content: string, model?: string, skillName?: string): Promise<SendMessageResponse> {
   return request<SendMessageResponse>(`/api/chats/${chatId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content, model })
+    body: JSON.stringify({ content, model, skillName })
   });
 }
 
 export async function listLlmModels(): Promise<ListLlmModelsResponse> {
   return request<ListLlmModelsResponse>("/api/llm/models");
+}
+
+export async function listSkills(): Promise<ListSkillsResponse> {
+  return request<ListSkillsResponse>("/api/skills");
 }
 
 export async function getRun(runId: string): Promise<Run> {

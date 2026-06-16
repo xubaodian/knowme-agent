@@ -8,6 +8,7 @@ const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 export class AgentEventBus {
   private sequence = 0;
+  private activeStep: { id: string; title: string } | undefined;
 
   constructor(
     private readonly run: Run,
@@ -15,13 +16,21 @@ export class AgentEventBus {
     readonly runLogger: RunLogger
   ) {}
 
+  setActiveStep(step: { id: string; title: string } | undefined): void {
+    this.activeStep = step;
+  }
+
   emit(draft: AgentEventDraft): RunEvent {
+    const stepId = draft.stepId ?? this.activeStep?.id;
+    const stepTitle = draft.stepTitle ?? (stepId ? this.activeStep?.title : undefined);
     const event: RunEvent = {
       id: createId("evt"),
       runId: this.run.id,
       chatId: this.run.chatId,
       createdAt: now(),
       sequence: ++this.sequence,
+      stepId,
+      stepTitle,
       ...draft
     };
 
@@ -36,6 +45,8 @@ export class AgentEventBus {
         flowKind: event.flowKind,
         visibility: event.visibility,
         artifactId: event.artifactId,
+        stepId: event.stepId,
+        stepTitle: event.stepTitle,
         actionCount: event.actions?.length ?? 0,
         detail: summarizeText(event.detail, 300)
       },

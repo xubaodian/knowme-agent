@@ -7,6 +7,15 @@ import type { ToolRegistry } from "../tools/tool-registry.js";
 import type { ToolRunner } from "../tools/tool-runner.js";
 import type { AgentEventBus } from "./event-bus.js";
 
+export type AgentLoopToolResult = {
+  toolName: string;
+  toolCallId: string;
+  ok: boolean;
+  summary?: string;
+  data?: unknown;
+  error?: string;
+};
+
 export type AgentLoopOptions = {
   name: string;
   llmMessages: LlmMessage[];
@@ -17,6 +26,7 @@ export type AgentLoopOptions = {
   trace?: RunTraceRecorder;
   parentTraceId?: string;
   allowedTools?: string[];
+  toolChoice?: "auto" | "none" | "required";
   maxIterations?: number;
   requireFinalContent?: boolean;
   allowSyntheticFinalContent?: boolean;
@@ -26,6 +36,7 @@ export type AgentLoopResult = {
   content: string;
   messages: LlmMessage[];
   failedToolCallCount: number;
+  toolResults: AgentLoopToolResult[];
 };
 
 type ToolCallExecutionResult =
@@ -48,6 +59,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   let failedToolCallCount = 0;
   let lastToolFailure: { name: string; error: string } | undefined;
   const successfulToolSummaries: string[] = [];
+  const toolResults: AgentLoopToolResult[] = [];
   let recoveryPromptCount = 0;
   const maxRecoveryPrompts = 3;
 
@@ -103,7 +115,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         request: {
           messages,
           tools: toolDefinitions,
-          toolChoice: toolDefinitions.length > 0 ? "auto" : "none",
+          toolChoice: resolveToolChoice(options.toolChoice, toolDefinitions.length, toolResults),
           temperature: 0.2
         }
       });
@@ -206,7 +218,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
                   content: syntheticContent
                 }
               ],
-              failedToolCallCount
+              failedToolCallCount,
+              toolResults
             };
           }
 
@@ -254,7 +267,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
               content: response.content
             }
           ],
-          failedToolCallCount
+          failedToolCallCount,
+          toolResults
         };
       }
 
@@ -279,6 +293,14 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
             iteration,
             toolCallId: toolCall.id
           }
+        });
+        toolResults.push({
+          toolName: toolCall.name,
+          toolCallId: toolCall.id,
+          ok: toolResult.ok,
+          summary: toolResult.ok ? toolResult.summary : undefined,
+          data: toolResult.ok ? toolResult.data : undefined,
+          error: toolResult.ok ? undefined : toolResult.error
         });
         if (toolResult.ok) {
           lastToolFailure = undefined;
@@ -327,11 +349,28 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       output: {
         messages,
         failedToolCallCount,
-        successfulToolSummaries
+        successfulToolSummaries,
+        toolResults
       }
     });
     throw error;
   }
+}
+
+function resolveToolChoice(
+  requested: AgentLoopOptions["toolChoice"],
+  toolCount: number,
+  toolResults: AgentLoopToolResult[]
+): "auto" | "none" | "required" {
+  if (toolCount === 0) {
+    return "none";
+  }
+
+  if (requested === "required") {
+    return toolResults.some((result) => result.ok) ? "auto" : "required";
+  }
+
+  return requested ?? "auto";
 }
 
 function selectTools(tools: AgentTool[], allowedTools?: string[]): AgentTool[] {

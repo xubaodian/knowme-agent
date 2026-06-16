@@ -32,6 +32,7 @@ type CreateRunTraceRecorderInput = {
   run: Run;
   prompt: string;
   model?: string;
+  skillName?: string;
   logDir?: string;
 };
 
@@ -69,6 +70,7 @@ export async function createRunTraceRecorder(input: CreateRunTraceRecorderInput)
     model: input.model,
     prompt: input.prompt,
     run: input.run,
+    skillName: input.skillName,
     traceDir
   });
 
@@ -96,6 +98,7 @@ export class RunTraceRecorder {
       model?: string;
       prompt: string;
       run: Run;
+      skillName?: string;
       traceDir: string;
     }
   ) {
@@ -120,6 +123,7 @@ export class RunTraceRecorder {
         chatId: this.options.run.chatId,
         userMessageId: this.options.run.userMessageId,
         model: model ?? this.options.model ?? this.options.run.model,
+        skillName: this.options.skillName ?? this.options.run.skillName,
         promptSummary: summarizeText(this.options.prompt, 220)
       });
       await this.startNode({
@@ -133,6 +137,7 @@ export class RunTraceRecorder {
         },
         metadata: {
           model: model ?? this.options.model ?? this.options.run.model,
+          skillName: this.options.skillName ?? this.options.run.skillName,
           folderName: this.options.folderName
         }
       });
@@ -220,6 +225,7 @@ export class RunTraceRecorder {
       chatId: this.options.run.chatId,
       userMessageId: this.options.run.userMessageId,
       model: this.options.model ?? this.options.run.model,
+      skillName: this.options.skillName ?? this.options.run.skillName,
       promptSummary: summarizeText(this.options.prompt, 220),
       durationMs: Date.parse(completedAt) - Date.parse(this.startedAt)
     });

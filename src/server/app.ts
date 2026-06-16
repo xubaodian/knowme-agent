@@ -6,6 +6,7 @@ import { chatRoutes } from "./routes/chats.js";
 import { debugRoutes } from "./routes/debug.js";
 import { llmRoutes } from "./routes/llm.js";
 import { runRoutes } from "./routes/runs.js";
+import { skillRoutes } from "./routes/skills.js";
 import { requestLogging } from "./middleware/request-logging.js";
 
 export function createApp() {
@@ -19,6 +20,7 @@ export function createApp() {
   app.route("/api/debug", debugRoutes);
   app.route("/api/llm", llmRoutes);
   app.route("/api/runs", runRoutes);
+  app.route("/api/skills", skillRoutes);
 
   app.get("/api", (c) =>
     c.json({

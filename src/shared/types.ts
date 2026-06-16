@@ -24,6 +24,7 @@ export type Run = {
   userMessageId: string;
   status: RunStatus;
   model?: string;
+  skillName: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -42,6 +43,16 @@ export type ListLlmModelsResponse = {
   currentModel: string;
   defaultModel: string;
   models: LlmModelOption[];
+};
+
+export type SkillOption = {
+  name: string;
+  description: string;
+};
+
+export type ListSkillsResponse = {
+  defaultSkillName: string;
+  skills: SkillOption[];
 };
 
 export type RunEventType =
@@ -198,6 +209,9 @@ export type RunEvent = {
   id: string;
   runId: string;
   chatId: string;
+  parentId?: string;
+  stepId?: string;
+  stepTitle?: string;
   type: RunEventType;
   title: string;
   detail?: string;
@@ -236,6 +250,7 @@ export type RunTraceSummary = {
   chatId?: string;
   userMessageId?: string;
   model?: string;
+  skillName?: string;
   promptSummary?: string;
   nodeCount?: number;
   durationMs?: number;

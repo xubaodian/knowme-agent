@@ -11,8 +11,9 @@ import {
 } from "lucide-react";
 import type { FormEvent, ReactNode, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import type { Artifact, ChatMessage, ChatSession, Run, RunEvent } from "../../shared/types";
+import type { Artifact, ChatMessage, ChatSession, Run, RunEvent, SkillOption } from "../../shared/types";
 import { ArtifactKindIcon } from "./artifact-renderers";
+import { SkillPicker } from "./skill-picker";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -28,8 +29,11 @@ export function AgentStream({
   messages,
   onDraftChange,
   onOpenArtifact,
+  onSkillChange,
   onSubmit,
-  selectedArtifactId
+  selectedArtifactId,
+  selectedSkillName,
+  skills
 }: {
   activeChat?: ChatSession;
   activeRun?: Run;
@@ -40,8 +44,11 @@ export function AgentStream({
   messages: ChatMessage[];
   onDraftChange: (value: string) => void;
   onOpenArtifact: (artifactId: string) => void;
+  onSkillChange: (value: string) => void;
   onSubmit: () => void;
   selectedArtifactId?: string;
+  selectedSkillName?: string;
+  skills: SkillOption[];
 }) {
   const latestUserMessage = useMemo(() => [...messages].reverse().find((message) => message.role === "user"), [messages]);
   const latestAssistantMessage = useMemo(
@@ -140,9 +147,12 @@ export function AgentStream({
               </Tooltip>
             </TooltipProvider>
 
-            <Button disabled={!draft.trim() || isSending} size="icon" title="Send" type="submit">
-              <Send className="size-4" />
-            </Button>
+            <div className="flex min-w-0 items-center gap-2">
+              <SkillPicker onChange={onSkillChange} selectedSkillName={selectedSkillName} skills={skills} />
+              <Button disabled={!draft.trim() || isSending || !selectedSkillName} size="icon" title="Send" type="submit">
+                <Send className="size-4" />
+              </Button>
+            </div>
           </div>
         </form>
       </footer>
@@ -188,6 +198,26 @@ function AgentRunCard({
   selectedArtifactId?: string;
 }) {
   const eventArtifacts = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+  const flowItems = buildFlowItems(events.filter((event) => event.visibility !== "internal" && event.visibility !== "debug"));
+
+  function renderEvent(event: RunEvent) {
+    if (event.type === "artifact.created" && event.artifactId) {
+      const artifact = eventArtifacts.get(event.artifactId);
+
+      if (artifact) {
+        return (
+          <ArtifactEvent
+            artifact={artifact}
+            isSelected={artifact.id === selectedArtifactId}
+            key={event.id}
+            onOpenArtifact={onOpenArtifact}
+          />
+        );
+      }
+    }
+
+    return <ProgressEvent event={event} key={event.id} />;
+  }
 
   return (
     <div className="flex gap-3">
@@ -200,26 +230,15 @@ function AgentRunCard({
           {events.length === 0 ? (
             <ProgressLine icon={<CircleDotDashed className="size-4" />} title="等待执行" detail="Run 已创建，正在等待第一批事件。" />
           ) : (
-            events
-              .filter((event) => event.visibility !== "internal" && event.visibility !== "debug")
-              .map((event) => {
-                if (event.type === "artifact.created" && event.artifactId) {
-                  const artifact = eventArtifacts.get(event.artifactId);
-
-                  if (artifact) {
-                    return (
-                      <ArtifactEvent
-                        artifact={artifact}
-                        isSelected={artifact.id === selectedArtifactId}
-                        key={event.id}
-                        onOpenArtifact={onOpenArtifact}
-                      />
-                    );
-                  }
-                }
-
-                return <ProgressEvent event={event} key={event.id} />;
-              })
+            flowItems.map((item) =>
+              item.kind === "event" ? (
+                renderEvent(item.event)
+              ) : (
+                <StepGroup key={item.step.id} step={item.step}>
+                  {item.step.children.map(renderEvent)}
+                </StepGroup>
+              )
+            )
           )}
         </div>
 
@@ -229,6 +248,85 @@ function AgentRunCard({
             Run completed
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+type FlowStep = {
+  id: string;
+  title: string;
+  event: RunEvent;
+  children: RunEvent[];
+};
+
+type FlowItem = { kind: "event"; event: RunEvent } | { kind: "step"; step: FlowStep };
+
+function buildFlowItems(events: RunEvent[]): FlowItem[] {
+  const items: FlowItem[] = [];
+  const steps = new Map<string, FlowStep>();
+
+  for (const event of events) {
+    if (event.flowKind === "todo" && event.stepId) {
+      const existing = steps.get(event.stepId);
+
+      if (existing) {
+        existing.title = event.stepTitle ?? event.title;
+        existing.event = event;
+      } else {
+        const step: FlowStep = {
+          id: event.stepId,
+          title: event.stepTitle ?? event.title,
+          event,
+          children: []
+        };
+        steps.set(event.stepId, step);
+        items.push({ kind: "step", step });
+      }
+      continue;
+    }
+
+    if (event.stepId) {
+      let step = steps.get(event.stepId);
+
+      if (!step) {
+        step = {
+          id: event.stepId,
+          title: event.stepTitle ?? "当前步骤",
+          event: {
+            ...event,
+            id: `${event.stepId}:placeholder`,
+            title: event.stepTitle ?? "当前步骤",
+            detail: undefined,
+            flowKind: "todo",
+            type: "todo.updated"
+          },
+          children: []
+        };
+        steps.set(event.stepId, step);
+        items.push({ kind: "step", step });
+      }
+
+      step.children.push(event);
+      continue;
+    }
+
+    items.push({ kind: "event", event });
+  }
+
+  return items;
+}
+
+function StepGroup({ children, step }: { children: ReactNode; step: FlowStep }) {
+  return (
+    <div className="rounded-lg bg-card/55 p-3 shadow-[var(--shadow-soft)]">
+      <ProgressEvent event={step.event} />
+      <div className="ml-2 mt-3 space-y-2 border-l border-border/45 pl-6">
+        {Array.isArray(children) && children.length === 0 ? (
+          <p className="text-xs text-muted-foreground">等待步骤内输出...</p>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );
@@ -314,7 +412,7 @@ function ArtifactEvent({
   }
 
   const canOpenPreview =
-    (artifact.display.mode === "button" || artifact.display.mode === "preview") && artifact.display.previewTarget === "sandbox";
+    (artifact.display.mode === "button" || artifact.display.mode === "preview") && artifact.display.previewTarget !== "none";
 
   return (
     <button

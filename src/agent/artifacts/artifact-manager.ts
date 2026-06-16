@@ -6,6 +6,8 @@ const now = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 export class ArtifactManager {
+  private readonly publishedArtifacts: Artifact[] = [];
+
   constructor(
     private readonly run: Run,
     private readonly eventBus: AgentEventBus,
@@ -39,9 +41,14 @@ export class ArtifactManager {
       previewTarget: artifact.display.previewTarget,
       contentSize: estimateArtifactSize(artifact)
     });
+    this.publishedArtifacts.push(artifact);
     this.onArtifact(artifact);
     this.eventBus.emitArtifact(artifact);
     return artifact;
+  }
+
+  getPublishedArtifacts(): Artifact[] {
+    return this.publishedArtifacts.map((artifact) => ({ ...artifact }));
   }
 }
 

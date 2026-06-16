@@ -2,10 +2,12 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { BrowserScreenshot, BrowserState, CommandResult, PatchEdit, SandboxAdapter } from "./sandbox-adapter.js";
 
 const maxOutputLength = 12_000;
 const defaultTimeoutMs = 10_000;
+const maxTimeoutMs = 30_000;
 
 export class LocalSandboxAdapter implements SandboxAdapter {
   private browserState: BrowserState = {
@@ -20,7 +22,7 @@ export class LocalSandboxAdapter implements SandboxAdapter {
     assertSafeCommand(input.command);
     const cwd = input.cwd ? this.resolveInsideRoot(input.cwd) : this.root;
 
-    return runShell(input.command, cwd, input.timeoutMs ?? defaultTimeoutMs);
+    return runShell(input.command, cwd, normalizeTimeout(input.timeoutMs));
   }
 
   async executeCode(input: { code: string; language: "javascript"; timeoutMs?: number }): Promise<CommandResult> {
@@ -28,7 +30,7 @@ export class LocalSandboxAdapter implements SandboxAdapter {
     const filePath = path.join(tempRoot, "snippet.mjs");
     await writeFile(filePath, input.code, "utf8");
 
-    return runProcess(process.execPath, [filePath], this.root, input.timeoutMs ?? defaultTimeoutMs);
+    return runProcess(process.execPath, [filePath], this.root, normalizeTimeout(input.timeoutMs));
   }
 
   async readFile(input: { path: string }): Promise<{ content: string }> {
@@ -71,6 +73,11 @@ export class LocalSandboxAdapter implements SandboxAdapter {
     await writeFile(targetPath, content, "utf8");
 
     return { path: path.relative(this.root, targetPath), applied };
+  }
+
+  async browserOpenFile(input: { path: string }): Promise<BrowserState> {
+    const targetPath = this.resolveInsideRoot(input.path);
+    return this.browserNavigate({ url: pathToFileURL(targetPath).href });
   }
 
   async browserNavigate(input: { url: string }): Promise<BrowserState> {
@@ -126,19 +133,36 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
   const startedAt = Date.now();
 
   return new Promise((resolve, reject) => {
+    const detached = process.platform !== "win32";
     const child = spawn(command, args, {
       cwd,
       shell,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      detached
     });
 
     let stdout = "";
     let stderr = "";
     let didTimeout = false;
+    let forceKillTimeout: NodeJS.Timeout | undefined;
+
+    const killProcessTree = (signal: NodeJS.Signals) => {
+      if (detached && child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // Fall through to killing the direct child. The process may already be gone.
+        }
+      }
+
+      child.kill(signal);
+    };
 
     const timeout = setTimeout(() => {
       didTimeout = true;
-      child.kill("SIGTERM");
+      killProcessTree("SIGTERM");
+      forceKillTimeout = setTimeout(() => killProcessTree("SIGKILL"), 1_000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -151,11 +175,17 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
 
     child.on("error", (error) => {
       clearTimeout(timeout);
+      if (forceKillTimeout) {
+        clearTimeout(forceKillTimeout);
+      }
       reject(error);
     });
 
     child.on("close", (exitCode) => {
       clearTimeout(timeout);
+      if (forceKillTimeout) {
+        clearTimeout(forceKillTimeout);
+      }
       resolve({
         exitCode,
         stdout,
@@ -171,6 +201,14 @@ function assertSafeCommand(command: string) {
     /\brm\s+-rf\b/,
     /\bgit\s+reset\s+--hard\b/,
     /\bgit\s+checkout\s+--\b/,
+    /\s&\s|\s&$/,
+    /\b(nohup|disown)\b/,
+    /\bpython3?\s+-m\s+http\.server\b/,
+    /\b(http-server|serve)\b/,
+    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start)\b/,
+    /\b(vite|next\s+dev)\b/,
+    /\btail\s+-f\b/,
+    /\bwatch\b/,
     /\bmkfs\b/,
     /\bshutdown\b/,
     /\breboot\b/
@@ -179,6 +217,14 @@ function assertSafeCommand(command: string) {
   if (forbiddenPatterns.some((pattern) => pattern.test(command))) {
     throw new Error(`Command is not allowed in local sandbox: ${command}`);
   }
+}
+
+function normalizeTimeout(timeoutMs: number | undefined): number {
+  if (!timeoutMs || !Number.isFinite(timeoutMs)) {
+    return defaultTimeoutMs;
+  }
+
+  return Math.max(1_000, Math.min(Math.trunc(timeoutMs), maxTimeoutMs));
 }
 
 function truncateOutput(output: string) {

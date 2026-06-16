@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatSession } from "../../shared/types.js";
+import { loadAppState, updateAppState } from "./local-state-store.js";
 
 const chats = new Map<string, ChatSession>();
 const messagesByChat = new Map<string, ChatMessage[]>();
@@ -6,12 +7,11 @@ const messagesByChat = new Map<string, ChatMessage[]>();
 const now = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
-const defaultChat = createChat("New session");
+hydrateChats();
 
-addAssistantMessage(
-  defaultChat.id,
-  "应用层已经准备好。发送一条消息后，右侧会展示一次 mock run 的执行进度。",
-);
+if (chats.size === 0) {
+  createChat("New session");
+}
 
 export function listChats(): ChatSession[] {
   return [...chats.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -28,6 +28,7 @@ export function createChat(title = "New session"): ChatSession {
 
   chats.set(chat.id, chat);
   messagesByChat.set(chat.id, []);
+  persistChats();
   return chat;
 }
 
@@ -73,5 +74,33 @@ function addMessage(
     chat.title = content.length > 32 ? `${content.slice(0, 32)}...` : content;
   }
 
+  persistChats();
   return message;
+}
+
+function hydrateChats(): void {
+  const state = loadAppState();
+
+  for (const chat of state.chats) {
+    chats.set(chat.id, { ...chat });
+  }
+
+  for (const [chatId, messages] of Object.entries(state.messagesByChat)) {
+    messagesByChat.set(
+      chatId,
+      messages.map((message) => ({ ...message }))
+    );
+  }
+}
+
+function persistChats(): void {
+  updateAppState((state) => {
+    state.chats = [...chats.values()].map((chat) => ({ ...chat }));
+    state.messagesByChat = Object.fromEntries(
+      [...messagesByChat.entries()].map(([chatId, messages]) => [
+        chatId,
+        messages.map((message) => ({ ...message }))
+      ])
+    );
+  });
 }

@@ -38,7 +38,9 @@ export class TodoManager {
     this.eventBus.emit({
       type,
       title: todo.title,
-      detail: todo.detail,
+      stepId: todo.id,
+      stepTitle: todo.title,
+      detail: formatTodoDetail(todo),
       status: mapTodoStatus(todo.status),
       flowKind: "todo",
       visibility: "primary"
@@ -57,6 +59,14 @@ function validateTodos(todos: Todo[]) {
 
     if (!todo.title.trim()) {
       throw new Error(`Todo ${todo.id} title is required.`);
+    }
+
+    if (!todo.description.trim()) {
+      throw new Error(`Todo ${todo.id} description is required.`);
+    }
+
+    if (!todo.expectedOutput.trim()) {
+      throw new Error(`Todo ${todo.id} expectedOutput is required.`);
     }
 
     if (ids.has(todo.id)) {
@@ -78,8 +88,13 @@ function validateTodos(todos: Todo[]) {
 function hasTodoChanged(previous: Todo, next: Todo) {
   return (
     previous.title !== next.title ||
+    previous.description !== next.description ||
+    previous.expectedOutput !== next.expectedOutput ||
     previous.detail !== next.detail ||
-    previous.status !== next.status
+    previous.status !== next.status ||
+    previous.outputSummary !== next.outputSummary ||
+    previous.artifactRefs?.join("|") !== next.artifactRefs?.join("|") ||
+    previous.sandboxRefs?.join("|") !== next.sandboxRefs?.join("|")
   );
 }
 
@@ -89,4 +104,16 @@ function mapTodoStatus(status: Todo["status"]): RunEvent["status"] {
   }
 
   return status;
+}
+
+function formatTodoDetail(todo: Todo): string {
+  const parts = [
+    todo.description,
+    todo.expectedOutput ? `Expected output: ${todo.expectedOutput}` : undefined,
+    todo.outputSummary ? `Completed: ${todo.outputSummary}` : undefined,
+    todo.artifactRefs?.length ? `Artifacts: ${todo.artifactRefs.join(", ")}` : undefined,
+    todo.sandboxRefs?.length ? `Sandbox: ${todo.sandboxRefs.join(", ")}` : undefined
+  ].filter(Boolean);
+
+  return parts.join("\n");
 }

@@ -1,12 +1,13 @@
 import { summarizeText } from "../../../logging/index.js";
-import type { AgentTool, ToolRunResult } from "../../types.js";
+import type { AgentTool, ToolExecutionContext, ToolRunResult } from "../../types.js";
 import type { PatchEdit } from "./sandbox-adapter.js";
 
 export function createSandboxTools(): AgentTool[] {
   return [
     {
       name: "execute_command",
-      description: "Execute a local sandbox shell command.",
+      description:
+        "Execute one short, non-interactive local sandbox shell command. Do not use it for background processes, servers, watchers, file previews, or writing large files.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -135,7 +136,7 @@ export function createSandboxTools(): AgentTool[] {
     },
     {
       name: "browser_navigate",
-      description: "Navigate the local browser sandbox to a URL.",
+      description: "Navigate the local browser sandbox to an explicit URL. For sandbox files, prefer browser_open_file.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -147,21 +148,29 @@ export function createSandboxTools(): AgentTool[] {
       summarizeInput: (input) => `导航到：${(input as { url: string }).url}`,
       async run(input, context): Promise<ToolRunResult> {
         const result = await context.sandbox.browserNavigate(input as { url: string });
-        context.eventBus.emit({
-          type: "sandbox.updated",
-          title: "浏览器导航",
-          detail: result.url,
-          status: "done",
-          flowKind: "sandbox",
-          visibility: "secondary",
-          actions: [
-            {
-              id: `act_${crypto.randomUUID()}`,
-              kind: "takeover",
-              label: "接管浏览器"
-            }
-          ]
-        });
+        emitBrowserUpdate(context, result);
+
+        return {
+          summary: `浏览器已打开 ${result.url}。`,
+          data: result
+        };
+      }
+    },
+    {
+      name: "browser_open_file",
+      description: "Open a file from the local sandbox workspace in the browser sandbox.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path"],
+        properties: {
+          path: { type: "string", description: "Path relative to the sandbox root." }
+        }
+      },
+      summarizeInput: (input) => `打开预览文件：${(input as { path: string }).path}`,
+      async run(input, context): Promise<ToolRunResult> {
+        const result = await context.sandbox.browserOpenFile(input as { path: string });
+        emitBrowserUpdate(context, result);
 
         return {
           summary: `浏览器已打开 ${result.url}。`,
@@ -193,6 +202,24 @@ export function createSandboxTools(): AgentTool[] {
       }
     }
   ];
+}
+
+function emitBrowserUpdate(context: ToolExecutionContext, result: { url: string }) {
+  context.eventBus.emit({
+    type: "sandbox.updated",
+    title: "浏览器导航",
+    detail: result.url,
+    status: "done",
+    flowKind: "sandbox",
+    visibility: "secondary",
+    actions: [
+      {
+        id: `act_${crypto.randomUUID()}`,
+        kind: "takeover",
+        label: "接管浏览器"
+      }
+    ]
+  });
 }
 
 function summarizeCommandInput(input: { command: string; cwd?: string; timeoutMs?: number }): string {

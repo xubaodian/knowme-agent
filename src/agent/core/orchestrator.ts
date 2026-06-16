@@ -2,14 +2,6 @@ import { ArtifactManager } from "../artifacts/artifact-manager.js";
 import { ContextManager } from "../context/context-manager.js";
 import { createRunLogger, getLogger } from "../../logging/index.js";
 import { createLlmProviderFromEnv } from "../llm/provider-factory.js";
-import { completeWithLogging } from "../llm/llm-runner.js";
-import {
-  buildDirectExecutionSystemPrompt,
-  buildFinalReplySystemPrompt,
-  buildPlanningSystemPrompt as buildAgentPlanningSystemPrompt,
-  buildTodoExecutionSystemPrompt
-} from "../prompts/index.js";
-import type { LoadedSkill } from "../skills/skill-registry.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { TodoManager } from "../todos/todo-manager.js";
 import { createArtifactTools } from "../tools/artifact-tools.js";
@@ -19,22 +11,9 @@ import { createSandboxTools } from "../tools/sandbox/sandbox-tools.js";
 import { createTodoTools } from "../tools/todo-tools.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolRunner } from "../tools/tool-runner.js";
-import type { AgentRunInput, AgentRunResult, Todo } from "../types.js";
-import { runAgentLoop } from "./agent-loop.js";
+import type { AgentRunInput, AgentRunResult } from "../types.js";
 import { AgentEventBus } from "./event-bus.js";
-import { selectAndLoadSkill } from "./skill-selector.js";
-
-const executionToolNames = [
-  "load_skill",
-  "read_file",
-  "write_file",
-  "patch_file",
-  "execute_command",
-  "execute_code",
-  "browser_navigate",
-  "browser_screenshot",
-  "create_artifact"
-];
+import { SkillRunEngine } from "./skill-run-engine.js";
 
 export class AgentOrchestrator {
   async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -67,10 +46,16 @@ export class AgentOrchestrator {
       input: {
         prompt: input.prompt,
         run: input.run,
+        loadedSkill: {
+          name: input.loadedSkill.name,
+          description: input.loadedSkill.description,
+          path: input.loadedSkill.path
+        },
         workspaceRoot: input.workspaceRoot,
         skillsRoot: input.skillsRoot
       },
       metadata: {
+        skillName: input.loadedSkill.name,
         workspaceRoot: input.workspaceRoot,
         skillsRoot: input.skillsRoot
       }
@@ -95,6 +80,7 @@ export class AgentOrchestrator {
       llmProvider,
       runLogger,
       trace: input.trace,
+      loadedSkill: input.loadedSkill,
       artifactManager,
       skillRegistry,
       sandbox,
@@ -140,104 +126,54 @@ export class AgentOrchestrator {
     }
 
     try {
-      const skillsResult = await toolRunner.run("list_skills", {}, { traceParentId: runtimeTraceNodeId });
-      const skills = Array.isArray(skillsResult.data)
-        ? (skillsResult.data as Array<{ name: string; description: string; directory: string }>)
-        : [];
-      runLogger.event("skill.listed", {
-        skillCount: skills.length,
-        skillNames: skills.map((skill) => skill.name)
+      runLogger.event("skill.loaded", {
+        skillName: input.loadedSkill.name,
+        directory: input.loadedSkill.directory,
+        contentChars: input.loadedSkill.content.length
       });
-      const loadedSkill = await selectAndLoadSkill({
-        prompt: input.prompt,
-        skills,
-        llmProvider,
-        toolRunner,
-        eventBus,
-        trace: input.trace,
-        parentTraceId: runtimeTraceNodeId
+      eventBus.emit({
+        type: "thought.created",
+        title: "Skill ready",
+        detail: `已选择 skill：${input.loadedSkill.name}`,
+        status: "done",
+        flowKind: "thought",
+        visibility: "secondary"
       });
-      runLogger.event("skill.selected", {
-        skillName: loadedSkill?.name ?? "none"
-      });
-
-      await this.askModelForTodoPlan(input.prompt, loadedSkill, registry, toolRunner, eventBus, llmProvider, input.trace, runtimeTraceNodeId);
-      const plannedTodos = normalizeTodoPlan(todoManager.getSnapshot());
-      runLogger.event("todo.plan.ready", {
-        todoCount: plannedTodos.length,
-        todoIds: plannedTodos.map((todo) => todo.id),
-        todoTitles: plannedTodos.map((todo) => todo.title)
-      });
-
-      if (plannedTodos.length > 0) {
-        runLogger.event("agent.execution.mode", {
-          mode: "todo-plan",
-          todoCount: plannedTodos.length
-        });
-        await toolRunner.run("write_todos", { todos: plannedTodos }, { traceParentId: runtimeTraceNodeId });
-        const finalTodos = await this.executeTodoPlan({
-          prompt: input.prompt,
-          loadedSkill,
-          todos: plannedTodos,
-          registry,
-          toolRunner,
-          eventBus,
-          contextManager,
-          llmProvider,
-          trace: input.trace,
-          parentTraceId: runtimeTraceNodeId
-        });
-        const reply = await this.createFinalReply(input.prompt, loadedSkill, finalTodos, contextManager, llmProvider, runLogger, input.trace, runtimeTraceNodeId);
-        emitFinalEvents(eventBus, reply);
-        await input.trace?.endNode(runtimeTraceNodeId, {
-          status: "success",
-          summary: "Agent runtime completed with a todo plan.",
-          output: {
-            mode: "todo-plan",
-            todos: finalTodos,
-            reply
-          }
-        });
-        runSpan.end({
-          mode: "todo-plan",
-          todoCount: finalTodos.length,
-          replyChars: reply.length
-        });
-        return { reply };
-      }
 
       runLogger.event("agent.execution.mode", {
-        mode: "direct"
+        mode: "skill-run-engine",
+        skillName: input.loadedSkill.name
       });
-      const directResult = await runAgentLoop({
-        name: "Direct executor",
-        llmProvider,
+      const skillRunResult = await new SkillRunEngine({
+        prompt: input.prompt,
+        loadedSkill: input.loadedSkill,
+        registry,
         toolRunner,
         eventBus,
+        contextManager,
+        todoManager,
+        artifactManager,
+        llmProvider,
         trace: input.trace,
-        parentTraceId: runtimeTraceNodeId,
-        allowedTools: executionToolNames,
-        requireFinalContent: true,
-        llmMessages: [
-          { role: "system", content: buildExecutionSystemPrompt(loadedSkill) },
-          { role: "user", content: input.prompt }
-        ],
-        toolRegistry: registry
-      });
-      const reply = directResult.content || "任务已完成。";
+        parentTraceId: runtimeTraceNodeId
+      }).run();
+      const reply = skillRunResult.reply || "任务已完成。";
 
       emitFinalEvents(eventBus, reply);
       await input.trace?.endNode(runtimeTraceNodeId, {
         status: "success",
-        summary: "Agent runtime completed directly.",
+        summary: "Agent runtime completed.",
         output: {
-          mode: "direct",
-          reply,
-          messages: directResult.messages
+          mode: "skill-run-engine",
+          todos: skillRunResult.todos,
+          completions: skillRunResult.completions,
+          reply
         }
       });
       runSpan.end({
-        mode: "direct",
+        mode: "skill-run-engine",
+        todoCount: skillRunResult.todos.length,
+        completionCount: skillRunResult.completions.length,
         replyChars: reply.length
       });
       return { reply };
@@ -251,244 +187,6 @@ export class AgentOrchestrator {
       throw error;
     }
   }
-
-  private async askModelForTodoPlan(
-    prompt: string,
-    loadedSkill: LoadedSkill | undefined,
-    registry: ToolRegistry,
-    toolRunner: ToolRunner,
-    eventBus: AgentEventBus,
-    llmProvider: NonNullable<AgentRunInput["llmProvider"]>,
-    trace: AgentRunInput["trace"],
-    parentTraceId: string | undefined
-  ) {
-    eventBus.runLogger.event("todo.planning.start", {
-      hasSkill: Boolean(loadedSkill),
-      allowedTools: ["write_todos"]
-    });
-    await runAgentLoop({
-      name: "Planner",
-      llmProvider,
-      toolRegistry: registry,
-      toolRunner,
-      eventBus,
-      trace,
-      parentTraceId,
-      allowedTools: ["write_todos"],
-      maxIterations: 6,
-      llmMessages: [
-        { role: "system", content: buildPlanningSystemPrompt(loadedSkill) },
-        { role: "user", content: prompt }
-      ]
-    });
-    eventBus.runLogger.event("todo.planning.end", {
-      hasSkill: Boolean(loadedSkill)
-    });
-  }
-
-  private async executeTodoPlan(options: {
-    prompt: string;
-    loadedSkill?: LoadedSkill;
-    todos: Todo[];
-    registry: ToolRegistry;
-    toolRunner: ToolRunner;
-    eventBus: AgentEventBus;
-    contextManager: ContextManager;
-    llmProvider: NonNullable<AgentRunInput["llmProvider"]>;
-    trace: AgentRunInput["trace"];
-    parentTraceId?: string;
-  }): Promise<Todo[]> {
-    let todos = options.todos;
-    const runLogger = options.eventBus.runLogger;
-
-    runLogger.event("todo.execution.start", {
-      todoCount: todos.length,
-      todoIds: todos.map((todo) => todo.id)
-    });
-
-    for (const [index, todo] of todos.entries()) {
-      const todoTraceNodeId = await options.trace?.startNode({
-        parentId: options.parentTraceId ?? options.trace.rootNodeId,
-        type: "todo",
-        title: todo.title,
-        summary: todo.detail,
-        input: {
-          userRequest: options.prompt,
-          todo,
-          index: index + 1,
-          total: todos.length,
-          sharedSummary: options.contextManager.getSharedSummary()
-        },
-        metadata: {
-          todoId: todo.id,
-          todoIndex: index + 1,
-          todoCount: todos.length
-        }
-      });
-      runLogger.event("todo.execute.start", {
-        todoId: todo.id,
-        todoTitle: todo.title,
-        todoIndex: index + 1,
-        todoCount: todos.length,
-        sharedSummaryChars: options.contextManager.getSharedSummary().length
-      });
-      todos = withTodoStatus(todos, todo.id, "in_progress");
-      await options.toolRunner.run("write_todos", { todos }, { traceParentId: todoTraceNodeId });
-
-      try {
-        const result = await runAgentLoop({
-          name: `Todo ${todo.id}`,
-          llmProvider: options.llmProvider,
-          toolRegistry: options.registry,
-          toolRunner: options.toolRunner,
-          eventBus: options.eventBus,
-          trace: options.trace,
-          parentTraceId: todoTraceNodeId,
-          allowedTools: executionToolNames,
-          requireFinalContent: true,
-          allowSyntheticFinalContent: true,
-          llmMessages: [
-            { role: "system", content: buildTodoSystemPrompt(options.loadedSkill, options.contextManager.getSharedSummary()) },
-            {
-              role: "user",
-              content: JSON.stringify({
-                userRequest: options.prompt,
-                todo: {
-                  id: todo.id,
-                  title: todo.title,
-                  detail: todo.detail
-                }
-              })
-            }
-          ]
-        });
-
-        options.contextManager.commitTodo({
-          todoId: todo.id,
-          summary: result.content || `${todo.title} 已完成。`
-        });
-        runLogger.event("todo.execute.end", {
-          todoId: todo.id,
-          todoTitle: todo.title,
-          resultChars: result.content.length,
-          commitCount: options.contextManager.getCommits().length
-        });
-        todos = withTodoStatus(todos, todo.id, "completed");
-        await options.toolRunner.run("write_todos", { todos }, { traceParentId: todoTraceNodeId });
-        await options.trace?.endNode(todoTraceNodeId, {
-          status: "success",
-          summary: result.content || `${todo.title} completed.`,
-          output: {
-            todo: todos.find((item) => item.id === todo.id),
-            result,
-            commits: options.contextManager.getCommits()
-          }
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Todo execution failed.";
-        runLogger.event(
-          "todo.execute.fail",
-          {
-            todoId: todo.id,
-            todoTitle: todo.title,
-            error: message
-          },
-          "error"
-        );
-        todos = withTodoStatus(todos, todo.id, "failed", message);
-        await options.toolRunner.run("write_todos", { todos }, { traceParentId: todoTraceNodeId });
-        await options.trace?.endNode(todoTraceNodeId, {
-          status: "error",
-          summary: message,
-          error,
-          output: {
-            todo: todos.find((item) => item.id === todo.id)
-          }
-        });
-        throw error;
-      }
-    }
-
-    runLogger.event("todo.execution.end", {
-      todoCount: todos.length,
-      completedCount: todos.filter((todo) => todo.status === "completed").length,
-      failedCount: todos.filter((todo) => todo.status === "failed").length
-    });
-
-    return todos;
-  }
-
-  private async createFinalReply(
-    prompt: string,
-    loadedSkill: LoadedSkill | undefined,
-    todos: Todo[],
-    contextManager: ContextManager,
-    llmProvider: NonNullable<AgentRunInput["llmProvider"]>,
-    runLogger: NonNullable<AgentRunInput["runLogger"]>,
-    trace: AgentRunInput["trace"],
-    parentTraceId: string | undefined
-  ): Promise<string> {
-    runLogger.event("final_reply.start", {
-      todoCount: todos.length,
-      commitCount: contextManager.getCommits().length,
-      hasSkill: Boolean(loadedSkill)
-    });
-    const response = await completeWithLogging({
-      provider: llmProvider,
-      runLogger,
-      trace,
-      traceParentId: parentTraceId,
-      phase: "final-reply",
-      request: {
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content: buildFinalReplySystemPrompt(loadedSkill?.content)
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              userRequest: prompt,
-              todos,
-              todoCommits: contextManager.getCommits()
-            })
-          }
-        ]
-      }
-    });
-
-    const reply = response.content.trim() || "任务已完成。";
-    runLogger.event("final_reply.end", {
-      replyChars: reply.length,
-      finishReason: response.finishReason
-    });
-
-    return reply;
-  }
-}
-
-function buildPlanningSystemPrompt(loadedSkill: LoadedSkill | undefined): string {
-  return buildAgentPlanningSystemPrompt(loadedSkill?.content);
-}
-
-function buildExecutionSystemPrompt(loadedSkill: LoadedSkill | undefined): string {
-  return buildDirectExecutionSystemPrompt(loadedSkill?.content);
-}
-
-function buildTodoSystemPrompt(loadedSkill: LoadedSkill | undefined, sharedSummary: string): string {
-  return buildTodoExecutionSystemPrompt(loadedSkill?.content, sharedSummary);
-}
-
-function normalizeTodoPlan(todos: Todo[]): Todo[] {
-  return todos.map((todo) => ({
-    ...todo,
-    status: "pending"
-  }));
-}
-
-function withTodoStatus(todos: Todo[], todoId: string, status: Todo["status"], detail?: string): Todo[] {
-  return todos.map((todo) => (todo.id === todoId ? { ...todo, status, detail: detail ?? todo.detail } : todo));
 }
 
 function emitFinalEvents(eventBus: AgentEventBus, reply: string) {

@@ -28,6 +28,7 @@ export type SandboxAdapter = {
   readFile(input: { path: string }): Promise<{ content: string }>;
   writeFile(input: { path: string; content: string }): Promise<{ path: string }>;
   patchFile(input: { path: string; edits: PatchEdit[] }): Promise<{ path: string; applied: number }>;
+  browserOpenFile(input: { path: string }): Promise<BrowserState>;
   browserNavigate(input: { url: string }): Promise<BrowserState>;
   browserScreenshot(input?: { fullPage?: boolean }): Promise<BrowserScreenshot>;
 };
