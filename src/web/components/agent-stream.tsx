@@ -1,18 +1,9 @@
-import {
-  Bot,
-  Check,
-  CheckCircle2,
-  Circle,
-  CircleDotDashed,
-  Image as ImageIcon,
-  Paperclip,
-  Send,
-  Wrench
-} from "lucide-react";
+import { Bot, Check, CheckCircle2, Circle, CircleDotDashed, Image as ImageIcon, Paperclip, Send, Wrench, XCircle } from "lucide-react";
 import type { FormEvent, ReactNode, UIEvent } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import type { Artifact, ChatMessage, ChatSession, Run, RunEvent, SkillOption } from "../../shared/types";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import type { Artifact, ChatMessage, ChatSession, LlmModelOption, Run, RunEvent, SkillOption } from "../../shared/types";
 import { ArtifactKindIcon } from "./artifact-renderers";
+import { ModelPicker } from "./model-picker";
 import { SkillPicker } from "./skill-picker";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -22,45 +13,91 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/t
 export function AgentStream({
   activeChat,
   activeRun,
-  artifacts,
+  artifactsByRun,
   draft,
-  events,
+  eventsByRun,
   isSending,
   messages,
+  models,
   onDraftChange,
+  onModelChange,
   onOpenArtifact,
   onSkillChange,
   onSubmit,
+  runs,
   selectedArtifactId,
+  selectedModel,
   selectedSkillName,
   skills
 }: {
   activeChat?: ChatSession;
   activeRun?: Run;
-  artifacts: Artifact[];
+  artifactsByRun: Record<string, Artifact[]>;
   draft: string;
-  events: RunEvent[];
+  eventsByRun: Record<string, RunEvent[]>;
   isSending: boolean;
   messages: ChatMessage[];
+  models: LlmModelOption[];
   onDraftChange: (value: string) => void;
+  onModelChange: (value: string) => void;
   onOpenArtifact: (artifactId: string) => void;
   onSkillChange: (value: string) => void;
   onSubmit: () => void;
+  runs: Run[];
   selectedArtifactId?: string;
+  selectedModel?: string;
   selectedSkillName?: string;
   skills: SkillOption[];
 }) {
-  const latestUserMessage = useMemo(() => [...messages].reverse().find((message) => message.role === "user"), [messages]);
-  const latestAssistantMessage = useMemo(
-    () => [...messages].reverse().find((message) => message.role === "assistant" && message.runId === activeRun?.id),
-    [messages, activeRun?.id]
+  const sortedMessages = useMemo(() => [...messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [messages]);
+  const sortedRuns = useMemo(() => [...runs].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [runs]);
+  const runIds = useMemo(() => new Set(sortedRuns.map((run) => run.id)), [sortedRuns]);
+  const assistantMessagesByRun = useMemo(() => {
+    const grouped = new Map<string, ChatMessage[]>();
+
+    for (const message of sortedMessages) {
+      if (message.role !== "assistant" || !message.runId) {
+        continue;
+      }
+
+      grouped.set(message.runId, [...(grouped.get(message.runId) ?? []), message]);
+    }
+
+    return grouped;
+  }, [sortedMessages]);
+  const runsByUserMessage = useMemo(() => {
+    const grouped = new Map<string, Run[]>();
+
+    for (const run of sortedRuns) {
+      grouped.set(run.userMessageId, [...(grouped.get(run.userMessageId) ?? []), run]);
+    }
+
+    return grouped;
+  }, [sortedRuns]);
+  const orphanRuns = useMemo(
+    () => sortedRuns.filter((run) => !sortedMessages.some((message) => message.id === run.userMessageId)),
+    [sortedMessages, sortedRuns]
+  );
+  const flowVersion = useMemo(
+    () =>
+      [
+        sortedMessages.length,
+        sortedRuns.map((run) => `${run.id}:${run.status}:${run.updatedAt}`).join("|"),
+        Object.values(eventsByRun)
+          .map((events) => events.length)
+          .join("|"),
+        Object.values(artifactsByRun)
+          .map((artifacts) => artifacts.length)
+          .join("|")
+      ].join(":"),
+    [artifactsByRun, eventsByRun, sortedMessages.length, sortedRuns]
   );
   const flowRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowFlowRef = useRef(true);
 
   useEffect(() => {
     shouldFollowFlowRef.current = true;
-  }, [activeChat?.id, activeRun?.id]);
+  }, [activeChat?.id]);
 
   useLayoutEffect(() => {
     const flow = flowRef.current;
@@ -74,7 +111,7 @@ export function AgentStream({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [activeRun?.status, artifacts.length, events.length, latestAssistantMessage?.id, latestUserMessage?.id]);
+  }, [flowVersion]);
 
   function handleFlowScroll(event: UIEvent<HTMLDivElement>) {
     const flow = event.currentTarget;
@@ -106,21 +143,48 @@ export function AgentStream({
         ref={flowRef}
       >
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-7">
-          {latestUserMessage ? <UserPrompt message={latestUserMessage} /> : null}
+          {sortedMessages.length === 0 && sortedRuns.length === 0 ? <WelcomeCard /> : null}
 
-          {activeRun || events.length > 0 ? (
+          {sortedMessages.map((message) => {
+            if (message.role === "assistant" && message.runId && runIds.has(message.runId)) {
+              return null;
+            }
+
+            if (message.role !== "user") {
+              return <AssistantMessage key={message.id} message={message} />;
+            }
+
+            const messageRuns = runsByUserMessage.get(message.id) ?? [];
+
+            return (
+              <Fragment key={message.id}>
+                <UserPrompt message={message} />
+                {messageRuns.map((run) => (
+                  <AgentRunCard
+                    artifacts={artifactsByRun[run.id] ?? []}
+                    assistantMessages={assistantMessagesByRun.get(run.id) ?? []}
+                    events={eventsByRun[run.id] ?? []}
+                    key={run.id}
+                    onOpenArtifact={onOpenArtifact}
+                    run={run}
+                    selectedArtifactId={selectedArtifactId}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
+
+          {orphanRuns.map((run) => (
             <AgentRunCard
-              activeRun={activeRun}
-              artifacts={artifacts}
-              events={events}
+              artifacts={artifactsByRun[run.id] ?? []}
+              assistantMessages={assistantMessagesByRun.get(run.id) ?? []}
+              events={eventsByRun[run.id] ?? []}
+              key={run.id}
               onOpenArtifact={onOpenArtifact}
+              run={run}
               selectedArtifactId={selectedArtifactId}
             />
-          ) : (
-            <WelcomeCard />
-          )}
-
-          {latestAssistantMessage ? <AssistantMessage message={latestAssistantMessage} /> : null}
+          ))}
         </div>
       </div>
 
@@ -148,8 +212,9 @@ export function AgentStream({
             </TooltipProvider>
 
             <div className="flex min-w-0 items-center gap-2">
+              <ModelPicker models={models} onChange={onModelChange} selectedModel={selectedModel} />
               <SkillPicker onChange={onSkillChange} selectedSkillName={selectedSkillName} skills={skills} />
-              <Button disabled={!draft.trim() || isSending || !selectedSkillName} size="icon" title="Send" type="submit">
+              <Button disabled={!draft.trim() || isSending || !selectedSkillName || !selectedModel} size="icon" title="Send" type="submit">
                 <Send className="size-4" />
               </Button>
             </div>
@@ -176,29 +241,30 @@ function WelcomeCard() {
       <AgentAvatar />
       <div className="space-y-3">
         <AgentName />
-        <p className="text-sm leading-6 text-muted-foreground">
-          应用层已经准备好。发送一条消息后，中间会展示 Agent 的 todo、工具使用和产物入口；右侧是沙箱预览与操作区。
-        </p>
+        <p className="text-sm leading-6 text-muted-foreground">选择会话或发送新任务后，这里会显示真实 runtime 事件。</p>
       </div>
     </div>
   );
 }
 
 function AgentRunCard({
-  activeRun,
   artifacts,
+  assistantMessages,
   events,
   onOpenArtifact,
+  run,
   selectedArtifactId
 }: {
-  activeRun?: Run;
   artifacts: Artifact[];
+  assistantMessages: ChatMessage[];
   events: RunEvent[];
   onOpenArtifact: (artifactId: string) => void;
+  run: Run;
   selectedArtifactId?: string;
 }) {
   const eventArtifacts = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
-  const flowItems = buildFlowItems(events.filter((event) => event.visibility !== "internal" && event.visibility !== "debug"));
+  const visibleEvents = events.filter((event) => event.visibility !== "internal" && event.visibility !== "debug");
+  const flowItems = buildFlowItems(visibleEvents);
 
   function renderEvent(event: RunEvent) {
     if (event.type === "artifact.created" && event.artifactId) {
@@ -223,31 +289,44 @@ function AgentRunCard({
     <div className="flex gap-3">
       <AgentAvatar />
       <div className="min-w-0 flex-1 space-y-5">
-        <AgentName />
-        <p className="text-sm leading-6">让我处理这个任务。我会先拆 todo，再执行工具，必要时把可操作的预览放到右侧沙箱。</p>
+        <div>
+          <div className="flex min-w-0 items-center gap-2">
+            <AgentName />
+            <Badge variant={run.status === "completed" ? "success" : "outline"}>{run.status}</Badge>
+          </div>
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {[run.skillName ?? "general-agent", run.model].filter(Boolean).join(" / ") || run.id}
+          </p>
+        </div>
 
         <div className="space-y-3">
           {events.length === 0 ? (
-            <ProgressLine icon={<CircleDotDashed className="size-4" />} title="等待执行" detail="Run 已创建，正在等待第一批事件。" />
+            <ProgressLine icon={<CircleDotDashed className="size-4" />} title="等待 runtime 事件" detail={run.id} />
           ) : (
-            flowItems.map((item) =>
-              item.kind === "event" ? (
-                renderEvent(item.event)
-              ) : (
+            flowItems.map((item) => {
+              if (item.kind === "event") {
+                return renderEvent(item.event);
+              }
+
+              const children = item.step.children.map(renderEvent).filter(Boolean);
+
+              return (
                 <StepGroup key={item.step.id} step={item.step}>
-                  {item.step.children.map(renderEvent)}
+                  {children}
                 </StepGroup>
-              )
-            )
+              );
+            })
           )}
         </div>
 
-        {activeRun?.status === "completed" ? (
-          <div className="flex items-center gap-2 text-sm text-emerald-400">
-            <CheckCircle2 className="size-4" />
-            Run completed
-          </div>
+        {run.status === "completed" ? (
+          <RunStatusLine icon={<CheckCircle2 className="size-4" />} text="Run completed" tone="done" />
         ) : null}
+        {run.status === "failed" ? <RunStatusLine icon={<XCircle className="size-4" />} text="Run failed" tone="failed" /> : null}
+
+        {assistantMessages.map((message) => (
+          <AssistantMessage key={message.id} message={message} />
+        ))}
       </div>
     </div>
   );
@@ -317,16 +396,12 @@ function buildFlowItems(events: RunEvent[]): FlowItem[] {
   return items;
 }
 
-function StepGroup({ children, step }: { children: ReactNode; step: FlowStep }) {
+function StepGroup({ children, step }: { children: ReactNode[]; step: FlowStep }) {
   return (
     <div className="rounded-lg bg-card/55 p-3 shadow-[var(--shadow-soft)]">
       <ProgressEvent event={step.event} />
       <div className="ml-2 mt-3 space-y-2 border-l border-border/45 pl-6">
-        {Array.isArray(children) && children.length === 0 ? (
-          <p className="text-xs text-muted-foreground">等待步骤内输出...</p>
-        ) : (
-          children
-        )}
+        {children.length === 0 ? <p className="text-xs text-muted-foreground">等待步骤内输出...</p> : children}
       </div>
     </div>
   );
@@ -390,6 +465,15 @@ function ProgressLine({
         <p className="font-medium text-foreground">{title}</p>
         {detail ? <p className="mt-1 break-words text-muted-foreground">{detail}</p> : null}
       </div>
+    </div>
+  );
+}
+
+function RunStatusLine({ icon, text, tone }: { icon: ReactNode; text: string; tone: "done" | "failed" }) {
+  return (
+    <div className={`flex items-center gap-2 text-sm ${tone === "done" ? "text-emerald-400" : "text-destructive"}`}>
+      {icon}
+      {text}
     </div>
   );
 }

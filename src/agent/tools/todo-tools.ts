@@ -1,63 +1,79 @@
-import type { AgentTool, ToolRunResult, WriteTodosInput } from "../types.js";
+import type { AgentTool, PlanTodosInput, ToolRunResult } from "../types.js";
 
 export function createTodoTools(): AgentTool[] {
   return [
     {
-      name: "write_todos",
-      description: "Write the complete current todo list snapshot.",
+      name: "plan_todos",
+      description: "Create or update the task execution plan and todo execution state.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
-        required: ["todos"],
         properties: {
+          action: { type: "string", enum: ["create", "update", "start", "complete", "fail"] },
+          goal: { type: "string" },
           todos: {
             type: "array",
             items: {
               type: "object",
               additionalProperties: false,
-              required: ["id", "title", "description", "expectedOutput", "status"],
+              required: ["title", "description", "expectedOutput"],
               properties: {
-                id: { type: "string", description: "Stable kebab-case todo id." },
+                id: { type: "string", description: "Stable todo id. If omitted, runtime assigns one." },
                 title: { type: "string", description: "Short todo name." },
-                description: { type: "string", description: "What this todo should do and why it exists." },
+                description: { type: "string", description: "What this execution unit should do and why." },
                 expectedOutput: { type: "string", description: "Concrete observable output expected from this todo." },
-                detail: { type: "string", description: "Optional legacy detail or failure detail." },
+                doneCriteria: { type: "array", items: { type: "string" }, description: "Specific completion checks." },
                 status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] },
+                summary: { type: "string" },
                 outputSummary: { type: "string" },
                 artifactRefs: { type: "array", items: { type: "string" } },
-                sandboxRefs: { type: "array", items: { type: "string" } }
+                sandboxRefs: { type: "array", items: { type: "string" } },
+                fileRefs: { type: "array", items: { type: "string" } },
+                evidenceRefs: { type: "array", items: { type: "string" } },
+                nextContext: { type: "string" },
+                missingCriteria: { type: "array", items: { type: "string" } }
               }
             }
-          }
+          },
+          todoId: { type: "string" },
+          title: { type: "string" },
+          description: { type: "string" },
+          expectedOutput: { type: "string" },
+          doneCriteria: { type: "array", items: { type: "string" } },
+          status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] },
+          summary: { type: "string" },
+          outputSummary: { type: "string" },
+          artifactRefs: { type: "array", items: { type: "string" } },
+          sandboxRefs: { type: "array", items: { type: "string" } },
+          fileRefs: { type: "array", items: { type: "string" } },
+          evidenceRefs: { type: "array", items: { type: "string" } },
+          nextContext: { type: "string" },
+          missingCriteria: { type: "array", items: { type: "string" } }
         }
       },
-      summarizeInput: (input) => summarizeTodos(input as WriteTodosInput),
-      summarizeOutput: (output) => output.summary ?? "Todo 状态已更新。",
+      summarizeInput: (input) => summarizePlanTodos(input as PlanTodosInput),
+      summarizeOutput: (output) => output.summary ?? "Todo plan 已更新。",
       async run(input, context): Promise<ToolRunResult> {
-        const todos = context.todoManager.applySnapshot(input as WriteTodosInput);
+        const plan = context.todoManager.applyPlan(input as PlanTodosInput);
 
         return {
-          summary: `已写入 ${todos.length} 个 todo。`,
-          data: todos
+          summary: `Todo plan 已更新：${plan.todos.length} 个 todo，goal=${plan.goal || "未设置"}。`,
+          data: plan
         };
       }
     }
   ];
 }
 
-function summarizeTodos(input: WriteTodosInput) {
-  if (input.todos.length === 0) {
-    return "写入空 todo 列表。";
-  }
+function summarizePlanTodos(input: PlanTodosInput) {
+  const action = input.action ?? (input.todos ? "create" : "update");
+  const parts = [
+    `action=${action}`,
+    input.goal ? `goal=${input.goal}` : undefined,
+    input.todoId ? `todo=${input.todoId}` : undefined,
+    input.todos ? `todos=${input.todos.length}` : undefined,
+    input.summary ? `summary=${input.summary.slice(0, 120)}` : undefined
+  ].filter(Boolean);
 
-  const statusCounts = input.todos.reduce<Record<string, number>>((counts, todo) => {
-    counts[todo.status] = (counts[todo.status] ?? 0) + 1;
-    return counts;
-  }, {});
-  const preview = input.todos
-    .slice(0, 6)
-    .map((todo) => `${todo.status}: ${todo.title} -> ${todo.expectedOutput}`)
-    .join("；");
-
-  return `写入 ${input.todos.length} 个 todo（${JSON.stringify(statusCounts)}）：${preview}`;
+  return `更新执行计划（${parts.join("，")}）。`;
 }

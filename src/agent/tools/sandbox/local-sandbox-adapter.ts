@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { BrowserScreenshot, BrowserState, CommandResult, PatchEdit, SandboxAdapter } from "./sandbox-adapter.js";
 
 const maxOutputLength = 12_000;
@@ -18,6 +17,17 @@ export class LocalSandboxAdapter implements SandboxAdapter {
 
   constructor(private readonly root: string) {}
 
+  async listFiles(input: { path?: string; maxEntries?: number } = {}): Promise<{ root: string; files: string[] }> {
+    const targetPath = this.resolveInsideRoot(input.path ?? ".");
+    const maxEntries = Math.max(1, Math.min(Math.trunc(input.maxEntries ?? 200), 1000));
+    const files = await walkFiles(targetPath, this.root, maxEntries);
+
+    return {
+      root: path.relative(this.root, targetPath) || ".",
+      files
+    };
+  }
+
   executeCommand(input: { command: string; cwd?: string; timeoutMs?: number }): Promise<CommandResult> {
     assertSafeCommand(input.command);
     const cwd = input.cwd ? this.resolveInsideRoot(input.cwd) : this.root;
@@ -25,12 +35,13 @@ export class LocalSandboxAdapter implements SandboxAdapter {
     return runShell(input.command, cwd, normalizeTimeout(input.timeoutMs));
   }
 
-  async executeCode(input: { code: string; language: "javascript"; timeoutMs?: number }): Promise<CommandResult> {
+  async executeCode(input: { code: string; language: "javascript" | "node" | "python"; timeoutMs?: number }): Promise<CommandResult> {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), "knowme-agent-code-"));
-    const filePath = path.join(tempRoot, "snippet.mjs");
+    const isPython = input.language === "python";
+    const filePath = path.join(tempRoot, isPython ? "snippet.py" : "snippet.mjs");
     await writeFile(filePath, input.code, "utf8");
 
-    return runProcess(process.execPath, [filePath], this.root, normalizeTimeout(input.timeoutMs));
+    return runProcess(isPython ? "python3" : process.execPath, [filePath], this.root, normalizeTimeout(input.timeoutMs));
   }
 
   async readFile(input: { path: string }): Promise<{ content: string }> {
@@ -77,13 +88,25 @@ export class LocalSandboxAdapter implements SandboxAdapter {
 
   async browserOpenFile(input: { path: string }): Promise<BrowserState> {
     const targetPath = this.resolveInsideRoot(input.path);
-    return this.browserNavigate({ url: pathToFileURL(targetPath).href });
+    const relativePath = path.relative(this.root, targetPath);
+
+    this.browserState = {
+      url: `workspace-file://${encodeURI(relativePath)}`,
+      title: path.basename(relativePath) || "Local Preview",
+      updatedAt: new Date().toISOString()
+    };
+
+    return this.browserState;
   }
 
   async browserNavigate(input: { url: string }): Promise<BrowserState> {
     const url = new URL(input.url, "http://127.0.0.1");
 
-    if (!["http:", "https:", "file:", "about:"].includes(url.protocol)) {
+    if (url.protocol === "file:") {
+      throw new Error("Use browser_open_file with a relative workspace path instead of browser_navigate file URLs.");
+    }
+
+    if (!["http:", "https:", "about:", "data:"].includes(url.protocol)) {
       throw new Error(`Unsupported browser protocol: ${url.protocol}`);
     }
 
@@ -113,7 +136,39 @@ export class LocalSandboxAdapter implements SandboxAdapter {
     };
   }
 
+  async browserClick(): Promise<BrowserState> {
+    this.browserState = {
+      ...this.browserState,
+      updatedAt: new Date().toISOString()
+    };
+
+    return this.browserState;
+  }
+
+  async browserType(): Promise<BrowserState> {
+    this.browserState = {
+      ...this.browserState,
+      updatedAt: new Date().toISOString()
+    };
+
+    return this.browserState;
+  }
+
+  async browserGetDom(): Promise<{ url: string; title: string; content: string }> {
+    return {
+      url: this.browserState.url,
+      title: this.browserState.title,
+      content: `<html><head><title>${escapeXml(this.browserState.title)}</title></head><body data-url="${escapeXml(
+        this.browserState.url
+      )}">Local browser simulation</body></html>`
+    };
+  }
+
   private resolveInsideRoot(inputPath: string) {
+    if (path.isAbsolute(inputPath) || /^[a-zA-Z]:[\\/]/.test(inputPath)) {
+      throw new Error(`Sandbox paths must be relative to the current run workspace: ${inputPath}`);
+    }
+
     const resolved = path.resolve(this.root, inputPath);
     const normalizedRoot = path.resolve(this.root);
 
@@ -241,4 +296,38 @@ function countOccurrences(content: string, search: string) {
 
 function escapeXml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+async function walkFiles(root: string, sandboxRoot: string, maxEntries: number): Promise<string[]> {
+  const output: string[] = [];
+
+  async function visit(current: string): Promise<void> {
+    if (output.length >= maxEntries) {
+      return;
+    }
+
+    const currentStat = await stat(current);
+
+    if (currentStat.isFile()) {
+      output.push(path.relative(sandboxRoot, current));
+      return;
+    }
+
+    if (!currentStat.isDirectory()) {
+      return;
+    }
+
+    const entries = await readdir(current, { withFileTypes: true });
+
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (output.length >= maxEntries || entry.name === "node_modules" || entry.name === ".git") {
+        continue;
+      }
+
+      await visit(path.join(current, entry.name));
+    }
+  }
+
+  await visit(root);
+  return output;
 }

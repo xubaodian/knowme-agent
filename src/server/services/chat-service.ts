@@ -9,12 +9,13 @@ const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 
 hydrateChats();
 
-if (chats.size === 0) {
-  createChat("New session");
-}
-
 export function listChats(): ChatSession[] {
   return [...chats.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export function getChat(chatId: string): ChatSession | undefined {
+  const chat = chats.get(chatId);
+  return chat ? { ...chat } : undefined;
 }
 
 export function createChat(title = "New session"): ChatSession {

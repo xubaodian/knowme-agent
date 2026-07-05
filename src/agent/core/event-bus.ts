@@ -9,6 +9,7 @@ const createId = (prefix: string) => `${prefix}_${crypto.randomUUID()}`;
 export class AgentEventBus {
   private sequence = 0;
   private activeStep: { id: string; title: string } | undefined;
+  private activeNode: { id: string; parentId?: string } | undefined;
 
   constructor(
     private readonly run: Run,
@@ -20,6 +21,18 @@ export class AgentEventBus {
     this.activeStep = step;
   }
 
+  getActiveStep(): { id: string; title: string } | undefined {
+    return this.activeStep ? { ...this.activeStep } : undefined;
+  }
+
+  setActiveNode(node: { id: string; parentId?: string } | undefined): void {
+    this.activeNode = node;
+  }
+
+  getActiveNode(): { id: string; parentId?: string } | undefined {
+    return this.activeNode ? { ...this.activeNode } : undefined;
+  }
+
   emit(draft: AgentEventDraft): RunEvent {
     const stepId = draft.stepId ?? this.activeStep?.id;
     const stepTitle = draft.stepTitle ?? (stepId ? this.activeStep?.title : undefined);
@@ -29,6 +42,8 @@ export class AgentEventBus {
       chatId: this.run.chatId,
       createdAt: now(),
       sequence: ++this.sequence,
+      nodeId: draft.nodeId ?? this.activeNode?.id,
+      parentNodeId: draft.parentNodeId ?? this.activeNode?.parentId,
       stepId,
       stepTitle,
       ...draft
@@ -45,6 +60,8 @@ export class AgentEventBus {
         flowKind: event.flowKind,
         visibility: event.visibility,
         artifactId: event.artifactId,
+        nodeId: event.nodeId,
+        parentNodeId: event.parentNodeId,
         stepId: event.stepId,
         stepTitle: event.stepTitle,
         actionCount: event.actions?.length ?? 0,

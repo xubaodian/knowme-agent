@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { isKnownLlmModel } from "../../agent/llm/index.js";
-import { addAssistantMessage, addUserMessage, createChat, getMessages, listChats } from "../services/chat-service.js";
-import { createRun, getLatestRunForChat } from "../services/run-service.js";
-import { assertKnownSkill, getDefaultSkillName } from "../services/skill-service.js";
+import { addAssistantMessage, addUserMessage, createChat, getChat, getMessages, listChats } from "../services/chat-service.js";
+import { createRun, getLatestRunForChat, getRunArtifacts, getRunEvents, getRunsForChat } from "../services/run-service.js";
+import { assertKnownSkill, normalizeSkillName } from "../services/skill-service.js";
 
 export const chatRoutes = new Hono();
 
@@ -24,6 +24,26 @@ chatRoutes.get("/:chatId/messages", (c) => {
   return c.json({ messages });
 });
 
+chatRoutes.get("/:chatId/timeline", (c) => {
+  const chatId = c.req.param("chatId");
+  const chat = getChat(chatId);
+  const messages = getMessages(chatId);
+
+  if (!chat || !messages) {
+    return c.json({ error: "Chat not found" }, 404);
+  }
+
+  const runs = getRunsForChat(chatId);
+
+  return c.json({
+    chat,
+    messages,
+    runs,
+    eventsByRun: Object.fromEntries(runs.map((run) => [run.id, getRunEvents(run.id)])),
+    artifactsByRun: Object.fromEntries(runs.map((run) => [run.id, getRunArtifacts(run.id)]))
+  });
+});
+
 chatRoutes.get("/:chatId/latest-run", (c) => {
   const chatId = c.req.param("chatId");
   const messages = getMessages(chatId);
@@ -42,7 +62,7 @@ chatRoutes.post("/:chatId/messages", async (c) => {
   const requestedModel = typeof body?.model === "string" ? body.model.trim() : "";
   const model = requestedModel || undefined;
   const requestedSkillName = typeof body?.skillName === "string" ? body.skillName.trim() : "";
-  const skillName = requestedSkillName || getDefaultSkillName();
+  const skillName = normalizeSkillName(requestedSkillName);
 
   if (!content) {
     return c.json({ error: "Message content is required" }, 400);

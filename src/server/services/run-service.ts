@@ -6,12 +6,13 @@ import { createRunLogger, getLogger, readLocalLogs } from "../../logging/index.j
 import { createRunTraceRecorder } from "../../logging/trace.js";
 import type { Artifact, Run, RunEvent } from "../../shared/types.js";
 import { getSkillRegistry } from "./skill-service.js";
+import { createLocalRunWorkspace, snapshotSkillToWorkspace } from "./local-run-workspace.js";
 import { loadAppState, updateAppState } from "./local-state-store.js";
 
 type CreateRunOptions = {
   chatId: string;
   model?: string;
-  skillName: string;
+  skillName?: string;
   userMessageId: string;
   prompt: string;
   onComplete?: (reply: string, runId: string) => void;
@@ -70,6 +71,13 @@ export function getLatestRunForChat(chatId: string): Run | undefined {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
+export function getRunsForChat(chatId: string): Run[] {
+  return [...runs.values()]
+    .filter((run) => run.chatId === chatId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((run) => ({ ...run }));
+}
+
 export function getRunEvents(runId: string): RunEvent[] {
   return (eventsByRun.get(runId) ?? []).map((event) => ({ ...event }));
 }
@@ -89,6 +97,7 @@ export function subscribeRunEvents(runId: string, listener: (event: RunEvent) =>
 }
 
 async function executeRun(run: Run, options: CreateRunOptions) {
+  const workspace = await createLocalRunWorkspace(run);
   const runLogger = createRunLogger(
     {
       runId: run.id,
@@ -98,7 +107,8 @@ async function executeRun(run: Run, options: CreateRunOptions) {
     logger
   );
   const span = runLogger.startSpan("run.execute", {
-    workspaceRoot: process.cwd(),
+    workspaceRoot: workspace.filesRoot,
+    runWorkspaceRoot: workspace.root,
     skillsRoot: path.join(process.cwd(), "agent", "skills"),
     skillName: run.skillName
   });
@@ -110,7 +120,10 @@ async function executeRun(run: Run, options: CreateRunOptions) {
   });
 
   try {
-    const loadedSkill = await getSkillRegistry().loadSkill(run.skillName);
+    const loadedSkill = await snapshotSkillToWorkspace(
+      run.skillName ? await getSkillRegistry().loadSkill(run.skillName) : undefined,
+      workspace
+    );
     const result = await runController.execute({
       run,
       loadedSkill,
@@ -123,8 +136,8 @@ async function executeRun(run: Run, options: CreateRunOptions) {
           : process.env
       ),
       prompt: options.prompt,
-      workspaceRoot: process.cwd(),
-      skillsRoot: path.join(process.cwd(), "agent", "skills"),
+      workspaceRoot: workspace.filesRoot,
+      skillsRoot: workspace.skillRoot,
       runLogger,
       trace,
       onEvent: (event) => {

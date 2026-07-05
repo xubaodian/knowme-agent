@@ -24,7 +24,7 @@ export type Run = {
   userMessageId: string;
   status: RunStatus;
   model?: string;
-  skillName: string;
+  skillName?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -48,6 +48,7 @@ export type ListLlmModelsResponse = {
 export type SkillOption = {
   name: string;
   description: string;
+  kind?: "skill" | "generic";
 };
 
 export type ListSkillsResponse = {
@@ -210,6 +211,8 @@ export type RunEvent = {
   runId: string;
   chatId: string;
   parentId?: string;
+  nodeId?: string;
+  parentNodeId?: string;
   stepId?: string;
   stepTitle?: string;
   type: RunEventType;
@@ -227,6 +230,14 @@ export type RunEvent = {
   };
 };
 
+export type ChatTimelineResponse = {
+  chat: ChatSession;
+  messages: ChatMessage[];
+  runs: Run[];
+  eventsByRun: Record<string, RunEvent[]>;
+  artifactsByRun: Record<string, Artifact[]>;
+};
+
 export type CreateChatResponse = {
   chat: ChatSession;
 };
@@ -236,7 +247,19 @@ export type SendMessageResponse = {
   run: Run;
 };
 
-export type RunTraceNodeType = "run" | "phase" | "llm" | "tool" | "todo" | "artifact" | "event" | "error";
+export type RunTraceNodeType =
+  | "run"
+  | "phase"
+  | "planning"
+  | "profile"
+  | "execution_unit"
+  | "finalization"
+  | "llm"
+  | "tool"
+  | "todo"
+  | "artifact"
+  | "event"
+  | "error";
 
 export type RunTraceNodeStatus = "pending" | "running" | "success" | "error" | "skipped";
 

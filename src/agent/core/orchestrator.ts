@@ -3,17 +3,21 @@ import { ContextManager } from "../context/context-manager.js";
 import { createRunLogger, getLogger } from "../../logging/index.js";
 import { createLlmProviderFromEnv } from "../llm/provider-factory.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
+import { TaskStateManager } from "../task/task-state-manager.js";
 import { TodoManager } from "../todos/todo-manager.js";
 import { createArtifactTools } from "../tools/artifact-tools.js";
-import { createSkillTools } from "../tools/skill-tools.js";
+import { createFinishTaskTools } from "../tools/finish-task-tool.js";
+import { createRecordNoteTools } from "../tools/record-note-tool.js";
 import { LocalSandboxAdapter } from "../tools/sandbox/local-sandbox-adapter.js";
 import { createSandboxTools } from "../tools/sandbox/sandbox-tools.js";
 import { createTodoTools } from "../tools/todo-tools.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolRunner } from "../tools/tool-runner.js";
-import type { AgentRunInput, AgentRunResult } from "../types.js";
+import type { AgentRunInput, AgentRunResult, ExecutionProfile } from "../types.js";
 import { AgentEventBus } from "./event-bus.js";
-import { SkillRunEngine } from "./skill-run-engine.js";
+import { ExecutionUnitRunner } from "./execution-unit-runner.js";
+import { FinalizationRunner } from "./finalization-runner.js";
+import { PlanningRunner } from "./planning-runner.js";
 
 export class AgentOrchestrator {
   async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -35,27 +39,26 @@ export class AgentOrchestrator {
     const todoManager = new TodoManager(eventBus);
     const contextManager = new ContextManager();
     const artifactManager = new ArtifactManager(input.run, eventBus, input.onArtifact);
+    const taskState = new TaskStateManager();
     const llmProvider = input.llmProvider ?? createLlmProviderFromEnv();
     const sandbox = new LocalSandboxAdapter(input.workspaceRoot);
     const registry = new ToolRegistry();
+    const profile = buildExecutionProfile(input.loadedSkill);
     const runtimeTraceNodeId = await input.trace?.startNode({
       parentId: input.trace.rootNodeId,
       type: "phase",
       title: "Agent runtime",
-      summary: "Prepare provider, skills, tools, and execution loop.",
+      summary: "Prepare provider, profile, tools, planning, execution units, and finalization.",
       input: {
         prompt: input.prompt,
         run: input.run,
-        loadedSkill: {
-          name: input.loadedSkill.name,
-          description: input.loadedSkill.description,
-          path: input.loadedSkill.path
-        },
+        profile: summarizeProfile(profile),
         workspaceRoot: input.workspaceRoot,
         skillsRoot: input.skillsRoot
       },
       metadata: {
-        skillName: input.loadedSkill.name,
+        profileMode: profile.mode,
+        skillName: profile.mode === "skill" ? profile.skillName : undefined,
         workspaceRoot: input.workspaceRoot,
         skillsRoot: input.skillsRoot
       }
@@ -63,8 +66,9 @@ export class AgentOrchestrator {
 
     registry.registerMany([
       ...createTodoTools(),
-      ...createSkillTools(),
       ...createArtifactTools(),
+      ...createFinishTaskTools(),
+      ...createRecordNoteTools(),
       ...createSandboxTools()
     ]);
     runLogger.event("tool.registry.ready", {
@@ -82,9 +86,11 @@ export class AgentOrchestrator {
       trace: input.trace,
       loadedSkill: input.loadedSkill,
       artifactManager,
+      contextManager,
       skillRegistry,
       sandbox,
-      todoManager
+      todoManager,
+      taskState
     });
 
     eventBus.emit({
@@ -126,27 +132,34 @@ export class AgentOrchestrator {
     }
 
     try {
-      runLogger.event("skill.loaded", {
-        skillName: input.loadedSkill.name,
-        directory: input.loadedSkill.directory,
-        contentChars: input.loadedSkill.content.length
-      });
+      runLogger.event("profile.ready", summarizeProfile(profile));
       eventBus.emit({
         type: "thought.created",
-        title: "Skill ready",
-        detail: `已选择 skill：${input.loadedSkill.name}`,
+        title: profile.mode === "skill" ? "Skill ready" : "Generic profile ready",
+        detail: profile.mode === "skill" ? `已选择 skill：${profile.skillName}` : "未选择 skill，使用通用执行 profile。",
         status: "done",
         flowKind: "thought",
         visibility: "secondary"
       });
 
       runLogger.event("agent.execution.mode", {
-        mode: "skill-run-engine",
-        skillName: input.loadedSkill.name
+        mode: "three-phase-runtime",
+        profile: summarizeProfile(profile)
       });
-      const skillRunResult = await new SkillRunEngine({
+      const plan = await new PlanningRunner({
         prompt: input.prompt,
-        loadedSkill: input.loadedSkill,
+        profile,
+        registry,
+        toolRunner,
+        eventBus,
+        todoManager,
+        llmProvider,
+        trace: input.trace,
+        parentTraceId: runtimeTraceNodeId
+      }).run();
+      const todos = await new ExecutionUnitRunner({
+        prompt: input.prompt,
+        profile,
         registry,
         toolRunner,
         eventBus,
@@ -156,24 +169,39 @@ export class AgentOrchestrator {
         llmProvider,
         trace: input.trace,
         parentTraceId: runtimeTraceNodeId
+      }).runAll(plan.todos);
+      const finished = await new FinalizationRunner({
+        profile,
+        goal: todoManager.getGoal(),
+        todos,
+        registry,
+        toolRunner,
+        eventBus,
+        contextManager,
+        artifactManager,
+        taskState,
+        llmProvider,
+        trace: input.trace,
+        parentTraceId: runtimeTraceNodeId
       }).run();
-      const reply = skillRunResult.reply || "任务已完成。";
+      const reply = finished.answer || "任务已完成。";
 
       emitFinalEvents(eventBus, reply);
       await input.trace?.endNode(runtimeTraceNodeId, {
         status: "success",
         summary: "Agent runtime completed.",
         output: {
-          mode: "skill-run-engine",
-          todos: skillRunResult.todos,
-          completions: skillRunResult.completions,
+          mode: "three-phase-runtime",
+          plan: todoManager.getPlan(),
+          completions: contextManager.getCompletions(),
+          finished,
           reply
         }
       });
       runSpan.end({
-        mode: "skill-run-engine",
-        todoCount: skillRunResult.todos.length,
-        completionCount: skillRunResult.completions.length,
+        mode: "three-phase-runtime",
+        todoCount: todos.length,
+        completionCount: contextManager.getCompletions().length,
         replyChars: reply.length
       });
       return { reply };
@@ -187,6 +215,35 @@ export class AgentOrchestrator {
       throw error;
     }
   }
+}
+
+function buildExecutionProfile(loadedSkill: AgentRunInput["loadedSkill"]): ExecutionProfile {
+  if (!loadedSkill) {
+    return {
+      mode: "generic",
+      profileName: "general-agent"
+    };
+  }
+
+  return {
+    mode: "skill",
+    skillName: loadedSkill.name,
+    skillContent: loadedSkill.content,
+    description: loadedSkill.description,
+    path: loadedSkill.path
+  };
+}
+
+function summarizeProfile(profile: ExecutionProfile) {
+  return profile.mode === "skill"
+    ? {
+        mode: profile.mode,
+        skillName: profile.skillName,
+        description: profile.description,
+        path: profile.path,
+        contentChars: profile.skillContent.length
+      }
+    : profile;
 }
 
 function emitFinalEvents(eventBus: AgentEventBus, reply: string) {

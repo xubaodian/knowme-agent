@@ -1,5 +1,6 @@
 import type {
   Artifact,
+  ChatTimelineResponse,
   ChatMessage,
   ChatSession,
   CreateChatResponse,
@@ -45,6 +46,10 @@ export async function createChat(): Promise<ChatSession> {
 export async function listMessages(chatId: string): Promise<ChatMessage[]> {
   const payload = await request<{ messages: ChatMessage[] }>(`/api/chats/${chatId}/messages`);
   return payload.messages;
+}
+
+export async function getChatTimeline(chatId: string): Promise<ChatTimelineResponse> {
+  return request<ChatTimelineResponse>(`/api/chats/${chatId}/timeline`);
 }
 
 export async function getLatestRunForChat(chatId: string): Promise<Run | undefined> {

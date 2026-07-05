@@ -1,6 +1,7 @@
 import { Paperclip, Send } from "lucide-react";
 import type { FormEvent } from "react";
-import type { SkillOption } from "../../shared/types";
+import type { LlmModelOption, SkillOption } from "../../shared/types";
+import { ModelPicker } from "./model-picker";
 import { SkillPicker } from "./skill-picker";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -9,17 +10,23 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/t
 export function NewTaskComposer({
   draft,
   isSending,
+  models,
   onDraftChange,
+  onModelChange,
   onSkillChange,
   onSubmit,
+  selectedModel,
   selectedSkillName,
   skills
 }: {
   draft: string;
   isSending: boolean;
+  models: LlmModelOption[];
   onDraftChange: (value: string) => void;
+  onModelChange: (value: string) => void;
   onSkillChange: (value: string) => void;
   onSubmit: () => void;
+  selectedModel?: string;
   selectedSkillName?: string;
   skills: SkillOption[];
 }) {
@@ -58,8 +65,9 @@ export function NewTaskComposer({
             </TooltipProvider>
 
             <div className="flex min-w-0 items-center gap-2">
+              <ModelPicker models={models} onChange={onModelChange} selectedModel={selectedModel} />
               <SkillPicker onChange={onSkillChange} selectedSkillName={selectedSkillName} skills={skills} />
-              <Button disabled={!draft.trim() || isSending || !selectedSkillName} size="icon" title="Send" type="submit">
+              <Button disabled={!draft.trim() || isSending || !selectedSkillName || !selectedModel} size="icon" title="Send" type="submit">
                 <Send className="size-4" />
               </Button>
             </div>

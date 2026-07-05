@@ -1,18 +1,25 @@
 import { Activity, Bot, Check, MessageSquarePlus, Moon, Search, Settings2, Sun, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import type { ChatSession } from "../../shared/types";
 import type { ThemeMode } from "../lib/theme";
 import { Button } from "./ui/button";
 
 export function SessionSidebar({
-  isCreating,
-  onCreateChat,
+  chats,
+  isNewTaskActive,
+  onNewTask,
+  onSelectChat,
   onThemeChange,
+  selectedChatId,
   theme
 }: {
-  isCreating: boolean;
-  onCreateChat: () => void;
+  chats: ChatSession[];
+  isNewTaskActive: boolean;
+  onNewTask: () => void;
+  onSelectChat: (chatId: string) => void;
   onThemeChange: (theme: ThemeMode) => void;
+  selectedChatId?: string;
   theme: ThemeMode;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -35,10 +42,40 @@ export function SessionSidebar({
       </div>
 
       <div className="space-y-4 px-3">
-        <Button className="w-full justify-start" disabled={isCreating} onClick={onCreateChat} type="button">
+        <Button
+          className="w-full justify-start"
+          onClick={onNewTask}
+          type="button"
+          variant={isNewTaskActive ? "default" : "secondary"}
+        >
           <MessageSquarePlus className="size-4" />
           新建任务
         </Button>
+      </div>
+
+      <div className="mt-5 min-h-0 flex-1 overflow-y-auto px-3">
+        <div className="mb-2 px-1 text-xs font-medium text-muted-foreground">历史任务</div>
+        <div className="space-y-1.5">
+          {chats.length === 0 ? (
+            <p className="px-1 py-2 text-xs leading-5 text-muted-foreground">暂无会话。</p>
+          ) : (
+            chats.map((chat) => (
+              <button
+                className={`w-full rounded-md px-3 py-2 text-left transition-colors ${
+                  chat.id === selectedChatId
+                    ? "bg-primary/15 text-foreground shadow-[0_10px_24px_rgba(37,208,186,0.1)]"
+                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                }`}
+                key={chat.id}
+                onClick={() => onSelectChat(chat.id)}
+                type="button"
+              >
+                <span className="block truncate text-sm font-medium">{chat.title}</span>
+                <span className="mt-1 block truncate text-[11px] text-muted-foreground">{formatChatTime(chat.updatedAt)}</span>
+              </button>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="mt-auto px-3 pb-4">
@@ -91,6 +128,21 @@ export function SessionSidebar({
       </div>
     </aside>
   );
+}
+
+function formatChatTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function ThemeOption({

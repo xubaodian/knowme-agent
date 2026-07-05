@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import type { Artifact, Run, RunEvent, RunEventType } from "../shared/types";
-import { createChat, getLatestRunForChat, listChats, listMessages, listRunArtifacts, listSkills, sendMessage } from "./api/client";
+import type { Artifact, ChatTimelineResponse, Run, RunEvent, RunEventType } from "../shared/types";
+import { createChat, getChatTimeline, listChats, listLlmModels, listSkills, sendMessage } from "./api/client";
 import { AgentStream } from "./components/agent-stream";
 import { DebugRunsPage } from "./components/debug-runs-page";
 import { NewTaskComposer } from "./components/new-task-composer";
@@ -28,6 +28,7 @@ const runEventTypes: RunEventType[] = [
 ];
 
 const themeStorageKey = "knowme-agent.theme";
+const modelStorageKey = "knowme-agent.model";
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") {
@@ -39,15 +40,22 @@ function getInitialTheme(): ThemeMode {
   return storedTheme === "dark" || storedTheme === "light" ? storedTheme : "light";
 }
 
+function getInitialModel(): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  return window.localStorage.getItem(modelStorageKey) ?? undefined;
+}
+
 export function App() {
   const queryClient = useQueryClient();
   const [selectedChatId, setSelectedChatId] = useState<string>();
+  const [isNewTaskDraft, setIsNewTaskDraft] = useState(false);
   const [draft, setDraft] = useState("");
-  const [activeRun, setActiveRun] = useState<Run>();
-  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
   const [selectedSkillName, setSelectedSkillName] = useState<string>();
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(getInitialModel);
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
   const [pathname, setPathname] = useState(() => (typeof window === "undefined" ? "/" : window.location.pathname));
 
@@ -63,13 +71,19 @@ export function App() {
     queryKey: ["chats"],
     queryFn: listChats
   });
-
   const chats = chatsQuery.data ?? [];
+
   const skillsQuery = useQuery({
     queryKey: ["skills"],
     queryFn: listSkills
   });
   const skills = skillsQuery.data?.skills ?? [];
+
+  const modelsQuery = useQuery({
+    queryKey: ["llm-models"],
+    queryFn: listLlmModels
+  });
+  const models = modelsQuery.data?.models ?? [];
 
   useEffect(() => {
     if (!selectedSkillName && skillsQuery.data) {
@@ -78,80 +92,96 @@ export function App() {
   }, [selectedSkillName, skills, skillsQuery.data]);
 
   useEffect(() => {
-    if (!selectedChatId && chats.length > 0) {
+    if (!modelsQuery.data) {
+      return;
+    }
+
+    const knownModelIds = new Set(modelsQuery.data.models.map((model) => model.id));
+    const preferredModel = selectedModel && knownModelIds.has(selectedModel) ? selectedModel : undefined;
+    const fallbackModel =
+      preferredModel ??
+      (knownModelIds.has(modelsQuery.data.currentModel) ? modelsQuery.data.currentModel : undefined) ??
+      (knownModelIds.has(modelsQuery.data.defaultModel) ? modelsQuery.data.defaultModel : undefined) ??
+      modelsQuery.data.models[0]?.id;
+
+    if (fallbackModel && fallbackModel !== selectedModel) {
+      setSelectedModel(fallbackModel);
+      window.localStorage.setItem(modelStorageKey, fallbackModel);
+    }
+  }, [modelsQuery.data, selectedModel]);
+
+  useEffect(() => {
+    if (!selectedChatId && !isNewTaskDraft && chats.length > 0) {
       setSelectedChatId(chats[0].id);
     }
-  }, [chats, selectedChatId]);
+  }, [chats, isNewTaskDraft, selectedChatId]);
 
-  const messagesQuery = useQuery({
-    queryKey: ["messages", selectedChatId],
-    queryFn: () => listMessages(selectedChatId ?? ""),
+  const timelineQuery = useQuery({
+    queryKey: ["chat-timeline", selectedChatId],
+    queryFn: () => getChatTimeline(selectedChatId ?? ""),
     enabled: Boolean(selectedChatId)
   });
-
-  const latestRunQuery = useQuery({
-    queryKey: ["latest-run", selectedChatId],
-    queryFn: () => getLatestRunForChat(selectedChatId ?? ""),
-    enabled: Boolean(selectedChatId)
-  });
-
-  const artifactsQuery = useQuery({
-    queryKey: ["run-artifacts", activeRun?.id],
-    queryFn: () => listRunArtifacts(activeRun?.id ?? ""),
-    enabled: Boolean(activeRun?.id)
-  });
+  const timeline = timelineQuery.data;
+  const messages = timeline?.messages ?? [];
+  const runs = timeline?.runs ?? [];
+  const eventsByRun = timeline?.eventsByRun ?? {};
+  const artifactsByRun = timeline?.artifactsByRun ?? {};
+  const allArtifacts = useMemo(
+    () =>
+      Object.values(artifactsByRun)
+        .flat()
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [artifactsByRun]
+  );
+  const activeChat = timeline?.chat ?? chats.find((chat) => chat.id === selectedChatId);
+  const activeRun = useMemo(() => chooseActiveRun(runs), [runs]);
+  const activeRunEvents = activeRun ? eventsByRun[activeRun.id] ?? [] : [];
+  const selectedArtifact = useMemo(
+    () => allArtifacts.find((artifact) => artifact.id === selectedArtifactId),
+    [allArtifacts, selectedArtifactId]
+  );
 
   useEffect(() => {
-    const latestRun = latestRunQuery.data;
-
-    if (!selectedChatId || latestRunQuery.isFetching) {
-      return;
-    }
-
-    if (!latestRun) {
-      return;
-    }
-
-    if (activeRun?.id !== latestRun.id) {
-      setActiveRun(latestRun);
-      setRunEvents([]);
-      setArtifacts([]);
+    if (selectedArtifactId && !selectedArtifact) {
       setSelectedArtifactId(undefined);
-    } else if (isNewerRunSnapshot(latestRun, activeRun)) {
-      setActiveRun(latestRun);
     }
-  }, [activeRun, latestRunQuery.data, latestRunQuery.isFetching, selectedChatId]);
-
-  useEffect(() => {
-    if (artifactsQuery.data) {
-      setArtifacts(artifactsQuery.data);
-    }
-  }, [artifactsQuery.data]);
-
-  const createChatMutation = useMutation({
-    mutationFn: createChat,
-    onSuccess: async (chat) => {
-      await queryClient.invalidateQueries({ queryKey: ["chats"] });
-      selectChat(chat.id);
-    }
-  });
+  }, [selectedArtifact, selectedArtifactId]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: (content: string) => sendMessage(selectedChatId ?? "", content, undefined, selectedSkillName),
-    onSuccess: async ({ run }) => {
+    mutationFn: async (content: string) => {
+      const targetChat = selectedChatId ? activeChat : await createChat();
+
+      if (!targetChat) {
+        throw new Error("No chat is selected.");
+      }
+
+      const result = await sendMessage(targetChat.id, content, selectedModel, selectedSkillName);
+      return { ...result, chat: targetChat };
+    },
+    onSuccess: async ({ chat, message, run }) => {
       setDraft("");
-      setActiveRun(run);
-      setRunEvents([]);
-      setArtifacts([]);
       setSelectedArtifactId(undefined);
-      await queryClient.invalidateQueries({ queryKey: ["messages", selectedChatId] });
+      setSelectedChatId(run.chatId);
+      setIsNewTaskDraft(false);
+      mergeTimeline(queryClient, run.chatId, emptyTimeline(chat), (current) => ({
+        ...current,
+        messages: upsertById(current.messages, message).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        runs: upsertById(current.runs, run).sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        eventsByRun: {
+          ...current.eventsByRun,
+          [run.id]: current.eventsByRun[run.id] ?? []
+        },
+        artifactsByRun: {
+          ...current.artifactsByRun,
+          [run.id]: current.artifactsByRun[run.id] ?? []
+        }
+      }));
       await queryClient.invalidateQueries({ queryKey: ["chats"] });
-      await queryClient.invalidateQueries({ queryKey: ["latest-run", selectedChatId] });
     }
   });
 
   useEffect(() => {
-    if (!activeRun) {
+    if (!activeRun || isTerminalRun(activeRun)) {
       return;
     }
 
@@ -160,36 +190,16 @@ export function App() {
     const handleEvent = (event: MessageEvent<string>) => {
       const runEvent = JSON.parse(event.data) as RunEvent;
 
-      setRunEvents((current) => {
-        if (current.some((item) => item.id === runEvent.id)) {
-          return current;
-        }
+      mergeRunEvent(queryClient, runEvent);
 
-        return [...current, runEvent].sort((a, b) => a.sequence - b.sequence);
-      });
-
-      if (runEvent.payload?.artifact) {
-        upsertArtifact(runEvent.payload.artifact);
-        if (canPreviewArtifact(runEvent.payload.artifact)) {
-          setSelectedArtifactId((current) => current ?? runEvent.payload?.artifact?.id);
-        }
+      if (runEvent.payload?.artifact && canPreviewArtifact(runEvent.payload.artifact)) {
+        setSelectedArtifactId((current) => current ?? runEvent.payload?.artifact?.id);
       }
 
       if (runEvent.type === "run.completed" || runEvent.type === "run.failed") {
-        setActiveRun((current) =>
-          current?.id === runEvent.runId
-            ? { ...current, status: runEvent.type === "run.completed" ? "completed" : "failed", updatedAt: runEvent.createdAt }
-            : current
-        );
         source.close();
-        void queryClient.invalidateQueries({ queryKey: ["messages", activeRun.chatId] });
+        void queryClient.invalidateQueries({ queryKey: ["chat-timeline", runEvent.chatId] });
         void queryClient.invalidateQueries({ queryKey: ["chats"] });
-        void queryClient.invalidateQueries({ queryKey: ["latest-run", activeRun.chatId] });
-        void queryClient.invalidateQueries({ queryKey: ["run-artifacts", activeRun.id] });
-      } else if (runEvent.type === "run.started") {
-        setActiveRun((current) =>
-          current?.id === runEvent.runId ? { ...current, status: "running", updatedAt: runEvent.createdAt } : current
-        );
       }
     };
 
@@ -209,29 +219,25 @@ export function App() {
     };
   }, [activeRun, queryClient]);
 
-  const messages = messagesQuery.data ?? [];
-  const activeChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId), [chats, selectedChatId]);
-  const selectedArtifact = useMemo(
-    () => artifacts.find((artifact) => artifact.id === selectedArtifactId),
-    [artifacts, selectedArtifactId]
-  );
-  const hasTaskActivity =
-    messages.some((message) => message.role === "user") || Boolean(activeRun) || runEvents.length > 0;
-  const showNewTaskComposer = !messagesQuery.isFetching && !hasTaskActivity;
-  const isSendDisabled = !selectedChatId || !selectedSkillName || sendMessageMutation.isPending;
+  const showNewTaskComposer = isNewTaskDraft || !selectedChatId || (!timelineQuery.isFetching && messages.length === 0 && runs.length === 0);
+  const isSendDisabled = !selectedSkillName || !selectedModel || sendMessageMutation.isPending;
 
   function selectChat(chatId: string) {
+    setIsNewTaskDraft(false);
     setSelectedChatId(chatId);
-    setActiveRun(undefined);
-    setRunEvents([]);
-    setArtifacts([]);
+    setSelectedArtifactId(undefined);
+  }
+
+  function startNewTask() {
+    setIsNewTaskDraft(true);
+    setSelectedChatId(undefined);
     setSelectedArtifactId(undefined);
   }
 
   function handleSubmit() {
     const content = draft.trim();
 
-    if (!content || !selectedChatId || sendMessageMutation.isPending) {
+    if (!content || sendMessageMutation.isPending) {
       return;
     }
 
@@ -243,31 +249,9 @@ export function App() {
     window.localStorage.setItem(themeStorageKey, nextTheme);
   }
 
-  function upsertArtifact(nextArtifact: Artifact) {
-    setArtifacts((current) => {
-      const existingIndex = current.findIndex((artifact) => artifact.id === nextArtifact.id);
-
-      if (existingIndex === -1) {
-        return [...current, nextArtifact];
-      }
-
-      return current.map((artifact, index) => (index === existingIndex ? nextArtifact : artifact));
-    });
-  }
-
-  function canPreviewArtifact(artifact: Artifact) {
-    return (
-      (artifact.display.mode === "button" || artifact.display.mode === "preview") &&
-      artifact.display.previewTarget !== "none"
-    );
-  }
-
-  function isNewerRunSnapshot(nextRun: Run, currentRun: Run) {
-    if (nextRun.updatedAt <= currentRun.updatedAt) {
-      return false;
-    }
-
-    return nextRun.status !== currentRun.status || nextRun.completedAt !== currentRun.completedAt;
+  function handleModelChange(nextModel: string) {
+    setSelectedModel(nextModel);
+    window.localStorage.setItem(modelStorageKey, nextModel);
   }
 
   if (pathname.startsWith("/debug/runs")) {
@@ -278,9 +262,12 @@ export function App() {
     <main className="app-shell h-screen overflow-hidden text-foreground" data-theme={theme}>
       <div className="grid h-full grid-cols-[260px_minmax(0,1fr)] max-lg:grid-cols-1 max-lg:grid-rows-[220px_minmax(0,1fr)]">
         <SessionSidebar
-          isCreating={createChatMutation.isPending}
-          onCreateChat={() => createChatMutation.mutate()}
+          chats={chats}
+          isNewTaskActive={isNewTaskDraft || !selectedChatId}
+          onNewTask={startNewTask}
+          onSelectChat={selectChat}
           onThemeChange={handleThemeChange}
+          selectedChatId={selectedChatId}
           theme={theme}
         />
 
@@ -288,9 +275,12 @@ export function App() {
           <NewTaskComposer
             draft={draft}
             isSending={isSendDisabled}
+            models={models}
             onDraftChange={setDraft}
+            onModelChange={handleModelChange}
             onSkillChange={setSelectedSkillName}
             onSubmit={handleSubmit}
+            selectedModel={selectedModel}
             selectedSkillName={selectedSkillName}
             skills={skills}
           />
@@ -300,16 +290,20 @@ export function App() {
               <AgentStream
                 activeChat={activeChat}
                 activeRun={activeRun}
-                artifacts={artifacts}
+                artifactsByRun={artifactsByRun}
                 draft={draft}
-                events={runEvents}
+                eventsByRun={eventsByRun}
                 isSending={isSendDisabled}
                 messages={messages}
+                models={models}
                 onDraftChange={setDraft}
+                onModelChange={handleModelChange}
                 onOpenArtifact={setSelectedArtifactId}
                 onSkillChange={setSelectedSkillName}
                 onSubmit={handleSubmit}
+                runs={runs}
                 selectedArtifactId={selectedArtifactId}
+                selectedModel={selectedModel}
                 selectedSkillName={selectedSkillName}
                 skills={skills}
               />
@@ -318,7 +312,7 @@ export function App() {
             <ResizablePanel defaultSize={44} minSize={30}>
               <SandboxPanel
                 activeRun={activeRun}
-                events={runEvents}
+                events={activeRunEvents}
                 onCloseArtifact={() => setSelectedArtifactId(undefined)}
                 selectedArtifact={selectedArtifact}
               />
@@ -328,4 +322,95 @@ export function App() {
       </div>
     </main>
   );
+}
+
+function chooseActiveRun(runs: Run[]): Run | undefined {
+  return [...runs].reverse().find((run) => !isTerminalRun(run)) ?? runs.at(-1);
+}
+
+function isTerminalRun(run: Run): boolean {
+  return run.status === "completed" || run.status === "failed";
+}
+
+function canPreviewArtifact(artifact: Artifact) {
+  return (
+    (artifact.display.mode === "button" || artifact.display.mode === "preview" || artifact.display.mode === "inline") &&
+    artifact.display.previewTarget !== "none"
+  );
+}
+
+function mergeRunEvent(queryClient: ReturnType<typeof useQueryClient>, event: RunEvent) {
+  mergeTimeline(queryClient, event.chatId, undefined, (current) => {
+    const currentEvents = current.eventsByRun[event.runId] ?? [];
+    const nextEvents = upsertById(currentEvents, event).sort((a, b) => a.sequence - b.sequence);
+    const nextRuns = current.runs.map((run) => {
+      if (run.id !== event.runId) {
+        return run;
+      }
+
+      if (event.type === "run.started") {
+        return { ...run, status: "running" as const, updatedAt: event.createdAt };
+      }
+
+      if (event.type === "run.completed" || event.type === "run.failed") {
+        return {
+          ...run,
+          status: event.type === "run.completed" ? ("completed" as const) : ("failed" as const),
+          updatedAt: event.createdAt,
+          completedAt: event.createdAt
+        };
+      }
+
+      return run;
+    });
+    const currentArtifacts = current.artifactsByRun[event.runId] ?? [];
+    const nextArtifacts = event.payload?.artifact
+      ? upsertById(currentArtifacts, event.payload.artifact).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      : currentArtifacts;
+
+    return {
+      ...current,
+      runs: nextRuns,
+      eventsByRun: {
+        ...current.eventsByRun,
+        [event.runId]: nextEvents
+      },
+      artifactsByRun: {
+        ...current.artifactsByRun,
+        [event.runId]: nextArtifacts
+      }
+    };
+  });
+}
+
+function mergeTimeline(
+  queryClient: ReturnType<typeof useQueryClient>,
+  chatId: string,
+  fallback: ChatTimelineResponse | undefined,
+  updater: (current: ChatTimelineResponse) => ChatTimelineResponse
+) {
+  queryClient.setQueryData<ChatTimelineResponse>(["chat-timeline", chatId], (current) => {
+    const base = current ?? fallback;
+    return base ? updater(base) : current;
+  });
+}
+
+function emptyTimeline(chat: ChatTimelineResponse["chat"]): ChatTimelineResponse {
+  return {
+    chat,
+    messages: [],
+    runs: [],
+    eventsByRun: {},
+    artifactsByRun: {}
+  };
+}
+
+function upsertById<T extends { id: string }>(items: T[], nextItem: T): T[] {
+  const index = items.findIndex((item) => item.id === nextItem.id);
+
+  if (index === -1) {
+    return [...items, nextItem];
+  }
+
+  return items.map((item, itemIndex) => (itemIndex === index ? nextItem : item));
 }

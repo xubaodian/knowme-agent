@@ -23,12 +23,16 @@ export type BrowserScreenshot = {
 };
 
 export type SandboxAdapter = {
+  listFiles(input?: { path?: string; maxEntries?: number }): Promise<{ root: string; files: string[] }>;
   executeCommand(input: { command: string; cwd?: string; timeoutMs?: number }): Promise<CommandResult>;
-  executeCode(input: { code: string; language: "javascript"; timeoutMs?: number }): Promise<CommandResult>;
+  executeCode(input: { code: string; language: "javascript" | "node" | "python"; timeoutMs?: number }): Promise<CommandResult>;
   readFile(input: { path: string }): Promise<{ content: string }>;
   writeFile(input: { path: string; content: string }): Promise<{ path: string }>;
   patchFile(input: { path: string; edits: PatchEdit[] }): Promise<{ path: string; applied: number }>;
   browserOpenFile(input: { path: string }): Promise<BrowserState>;
   browserNavigate(input: { url: string }): Promise<BrowserState>;
   browserScreenshot(input?: { fullPage?: boolean }): Promise<BrowserScreenshot>;
+  browserClick(input: { selector?: string; x?: number; y?: number }): Promise<BrowserState>;
+  browserType(input: { selector?: string; text: string }): Promise<BrowserState>;
+  browserGetDom(): Promise<{ url: string; title: string; content: string }>;
 };

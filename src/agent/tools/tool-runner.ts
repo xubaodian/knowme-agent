@@ -38,11 +38,17 @@ export class ToolRunner {
       inputSummary,
       inputSize: estimateJsonSize(input)
     });
+    this.context.runLogger.event("tool.run.input", {
+      toolName: tool.name,
+      input
+    });
 
     this.context.eventBus.emit({
       type: "tool.started",
       title: tool.name,
       detail: inputSummary,
+      nodeId: traceNodeId,
+      parentNodeId: options.traceParentId,
       status: "in_progress",
       flowKind: "tool",
       visibility: "primary"
@@ -57,6 +63,10 @@ export class ToolRunner {
         hasData: output.data !== undefined,
         outputDataKind: describeDataKind(output.data),
         outputDataKeys: describeDataKeys(output.data)
+      });
+      this.context.runLogger.event("tool.run.output", {
+        toolName: tool.name,
+        output
       });
       await this.context.trace?.endNode(traceNodeId, {
         status: "success",
@@ -73,6 +83,8 @@ export class ToolRunner {
         type: "tool.finished",
         title: `${tool.name} completed`,
         detail: outputSummary,
+        nodeId: traceNodeId,
+        parentNodeId: options.traceParentId,
         status: "done",
         flowKind: "tool",
         visibility: "primary"
@@ -81,6 +93,15 @@ export class ToolRunner {
       return output;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tool execution failed.";
+      this.context.runLogger.event(
+        "tool.run.error",
+        {
+          toolName: tool.name,
+          input,
+          error: message
+        },
+        "error"
+      );
       span.fail(error, {
         toolName: tool.name,
         inputSize: estimateJsonSize(input)
@@ -98,6 +119,8 @@ export class ToolRunner {
         type: "tool.finished",
         title: `${tool.name} failed`,
         detail: message,
+        nodeId: traceNodeId,
+        parentNodeId: options.traceParentId,
         status: "failed",
         flowKind: "error",
         visibility: "primary"

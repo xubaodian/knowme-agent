@@ -1,5 +1,6 @@
 import type { Artifact, Run, RunEvent, RunEventType } from "../shared/types.js";
 import type { ArtifactManager } from "./artifacts/artifact-manager.js";
+import type { ContextManager } from "./context/context-manager.js";
 import type { AgentEventBus } from "./core/event-bus.js";
 import type { LlmProvider } from "./llm/types.js";
 import type { LoadedSkill } from "./skills/skill-registry.js";
@@ -16,15 +17,90 @@ export type Todo = {
   title: string;
   description: string;
   expectedOutput: string;
+  doneCriteria: string[];
   detail?: string;
   status: TodoStatus;
+  summary?: string;
   outputSummary?: string;
   artifactRefs?: string[];
   sandboxRefs?: string[];
+  fileRefs?: string[];
+  evidenceRefs?: string[];
+  nextContext?: string;
+  missingCriteria?: string[];
 };
 
-export type WriteTodosInput = {
+export type PlanTodosAction = "create" | "update" | "start" | "complete" | "fail";
+
+export type ExecutionTodoDraft = {
+  id?: string;
+  title: string;
+  description: string;
+  expectedOutput: string;
+  doneCriteria?: string[];
+  status?: TodoStatus;
+  summary?: string;
+  outputSummary?: string;
+  artifactRefs?: string[];
+  sandboxRefs?: string[];
+  fileRefs?: string[];
+  evidenceRefs?: string[];
+  nextContext?: string;
+  missingCriteria?: string[];
+};
+
+export type PlanTodosInput = {
+  action?: PlanTodosAction;
+  goal?: string;
+  todos?: ExecutionTodoDraft[];
+  todoId?: string;
+  title?: string;
+  description?: string;
+  expectedOutput?: string;
+  doneCriteria?: string[];
+  status?: TodoStatus;
+  summary?: string;
+  outputSummary?: string;
+  artifactRefs?: string[];
+  sandboxRefs?: string[];
+  fileRefs?: string[];
+  evidenceRefs?: string[];
+  nextContext?: string;
+  missingCriteria?: string[];
+};
+
+export type ExecutionPlan = {
+  goal: string;
   todos: Todo[];
+};
+
+export type ExecutionProfile =
+  | {
+      mode: "skill";
+      skillName: string;
+      skillContent: string;
+      description?: string;
+      path?: string;
+    }
+  | {
+      mode: "generic";
+      profileName: "general-agent";
+    };
+
+export type ExecutionNodeKind = "planning" | "skill" | "profile" | "execution_unit" | "tool" | "artifact" | "finalization";
+
+export type ExecutionNode = {
+  id: string;
+  runId: string;
+  parentId?: string;
+  kind: ExecutionNodeKind;
+  title: string;
+  status: "queued" | "running" | "completed" | "failed";
+  input?: unknown;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type TodoOutputRef = {
@@ -45,20 +121,39 @@ export type TodoCompletion = {
   outputs: TodoOutputRef[];
   artifactRefs: string[];
   sandboxRefs: string[];
+  fileRefs: string[];
+  evidenceRefs: string[];
   decisions: string[];
   nextContextSummary: string;
+  missingCriteria?: string[];
+};
+
+export type RecordNote = {
+  id: string;
+  runId: string;
+  chatId: string;
+  todoId?: string;
+  todoTitle?: string;
+  executionNodeId?: string;
+  title: string;
+  content: string;
+  createdAt: string;
+};
+
+export type ContextRecordNote = Omit<RecordNote, "content"> & {
+  content: string;
+  truncated: boolean;
+  contentChars: number;
 };
 
 export type ContextPack = {
   userRequest: string;
-  skill?: {
-    name: string;
-    description?: string;
-  };
+  profile: ExecutionProfile;
   currentTodo: Todo;
   todoPlan: Todo[];
   previousCompletions: TodoCompletion[];
   carryForwardSummary: string;
+  recordNotes: ContextRecordNote[];
 };
 
 export type AgentRunInput = {
@@ -66,7 +161,7 @@ export type AgentRunInput = {
   prompt: string;
   workspaceRoot: string;
   skillsRoot: string;
-  loadedSkill: LoadedSkill;
+  loadedSkill?: LoadedSkill;
   llmProvider?: LlmProvider;
   runLogger?: RunLogger;
   trace?: RunTraceRecorder;
@@ -82,6 +177,8 @@ export type AgentEventDraft = {
   type: RunEventType;
   title: string;
   parentId?: string;
+  nodeId?: string;
+  parentNodeId?: string;
   stepId?: string;
   stepTitle?: string;
   detail?: string;
@@ -101,11 +198,13 @@ export type ToolExecutionContext = {
   llmProvider: LlmProvider;
   runLogger: RunLogger;
   trace?: RunTraceRecorder;
-  loadedSkill: LoadedSkill;
+  loadedSkill?: LoadedSkill;
   artifactManager: ArtifactManager;
+  contextManager: ContextManager;
   skillRegistry: SkillRegistry;
   sandbox: SandboxAdapter;
   todoManager: TodoManager;
+  taskState: TaskStateManager;
 };
 
 export type ToolRunResult = {
@@ -121,3 +220,16 @@ export type AgentTool<TInput = unknown, TOutput extends ToolRunResult = ToolRunR
   summarizeInput?: (input: TInput) => string;
   summarizeOutput?: (output: TOutput) => string;
 };
+
+export type FinishedTask = {
+  status: "completed" | "failed";
+  answer: string;
+  artifactRefs: string[];
+  fileRefs: string[];
+  summary: string;
+};
+
+export interface TaskStateManager {
+  finish(input: FinishedTask): FinishedTask;
+  getFinishedTask(): FinishedTask | undefined;
+}
