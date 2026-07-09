@@ -1,6 +1,8 @@
 import { Bot, Check, CheckCircle2, Circle, CircleDotDashed, Image as ImageIcon, Paperclip, Send, Wrench, XCircle } from "lucide-react";
 import type { FormEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { buildRunFlowViewModel } from "../../shared/run-flow-view-model";
+import type { RunFlowAction, RunFlowPlanning, RunFlowTodo } from "../../shared/run-flow-view-model";
 import type { Artifact, ChatMessage, ChatSession, LlmModelOption, Run, RunEvent, SkillOption } from "../../shared/types";
 import { ArtifactKindIcon } from "./artifact-renderers";
 import { ModelPicker } from "./model-picker";
@@ -262,28 +264,22 @@ function AgentRunCard({
   run: Run;
   selectedArtifactId?: string;
 }) {
-  const eventArtifacts = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
-  const visibleEvents = events.filter((event) => event.visibility !== "internal" && event.visibility !== "debug");
-  const flowItems = buildFlowItems(visibleEvents);
-
-  function renderEvent(event: RunEvent) {
-    if (event.type === "artifact.created" && event.artifactId) {
-      const artifact = eventArtifacts.get(event.artifactId);
-
-      if (artifact) {
-        return (
-          <ArtifactEvent
-            artifact={artifact}
-            isSelected={artifact.id === selectedArtifactId}
-            key={event.id}
-            onOpenArtifact={onOpenArtifact}
-          />
-        );
-      }
-    }
-
-    return <ProgressEvent event={event} key={event.id} />;
-  }
+  const flow = useMemo(
+    () =>
+      buildRunFlowViewModel({
+        run,
+        events,
+        artifacts,
+        assistantMessages
+      }),
+    [artifacts, assistantMessages, events, run]
+  );
+  const hasVisibleWork =
+    Boolean(flow.planning) ||
+    flow.todos.length > 0 ||
+    flow.runActions.length > 0 ||
+    flow.runArtifacts.length > 0 ||
+    flow.finalMessages.length > 0;
 
   return (
     <div className="flex gap-3">
@@ -300,110 +296,110 @@ function AgentRunCard({
         </div>
 
         <div className="space-y-3">
-          {events.length === 0 ? (
-            <ProgressLine icon={<CircleDotDashed className="size-4" />} title="等待 runtime 事件" detail={run.id} />
-          ) : (
-            flowItems.map((item) => {
-              if (item.kind === "event") {
-                return renderEvent(item.event);
-              }
-
-              const children = item.step.children.map(renderEvent).filter(Boolean);
-
-              return (
-                <StepGroup key={item.step.id} step={item.step}>
-                  {children}
-                </StepGroup>
-              );
-            })
-          )}
+          {!hasVisibleWork ? <ProgressLine icon={<CircleDotDashed className="size-4" />} title="正在等待执行进展" detail={run.id} /> : null}
+          {flow.planning ? <PlanningBlock planning={flow.planning} /> : null}
+          {flow.todos.map((todo, index) => (
+            <TodoBlock
+              index={index}
+              key={todo.id}
+              onOpenArtifact={onOpenArtifact}
+              selectedArtifactId={selectedArtifactId}
+              todo={todo}
+            />
+          ))}
+          {flow.runActions.length > 0 ? <ActionList actions={flow.runActions} /> : null}
+          {flow.runArtifacts.length > 0 ? (
+            <ArtifactList
+              artifacts={flow.runArtifacts}
+              onOpenArtifact={onOpenArtifact}
+              selectedArtifactId={selectedArtifactId}
+            />
+          ) : null}
         </div>
 
-        {run.status === "completed" ? (
-          <RunStatusLine icon={<CheckCircle2 className="size-4" />} text="Run completed" tone="done" />
-        ) : null}
-        {run.status === "failed" ? <RunStatusLine icon={<XCircle className="size-4" />} text="Run failed" tone="failed" /> : null}
-
-        {assistantMessages.map((message) => (
-          <AssistantMessage key={message.id} message={message} />
+        {flow.finalMessages.map((message) => (
+          <FinalMessage key={message.id} message={message} />
         ))}
       </div>
     </div>
   );
 }
 
-type FlowStep = {
-  id: string;
-  title: string;
-  event: RunEvent;
-  children: RunEvent[];
-};
+function PlanningBlock({ planning }: { planning: RunFlowPlanning }) {
+  return (
+    <details className="group rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]" open={planning.status === "running"}>
+      <summary className="flex cursor-pointer list-none items-center gap-3">
+        <StatusDot status={planning.status === "completed" ? "completed" : "running"} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-medium text-foreground">已制定执行计划</p>
+            <Badge variant="outline">{planning.todos.length} todos</Badge>
+          </div>
+          {planning.goal ? <p className="mt-1 truncate text-sm text-muted-foreground">{planning.goal}</p> : null}
+        </div>
+      </summary>
 
-type FlowItem = { kind: "event"; event: RunEvent } | { kind: "step"; step: FlowStep };
-
-function buildFlowItems(events: RunEvent[]): FlowItem[] {
-  const items: FlowItem[] = [];
-  const steps = new Map<string, FlowStep>();
-
-  for (const event of events) {
-    if (event.flowKind === "todo" && event.stepId) {
-      const existing = steps.get(event.stepId);
-
-      if (existing) {
-        existing.title = event.stepTitle ?? event.title;
-        existing.event = event;
-      } else {
-        const step: FlowStep = {
-          id: event.stepId,
-          title: event.stepTitle ?? event.title,
-          event,
-          children: []
-        };
-        steps.set(event.stepId, step);
-        items.push({ kind: "step", step });
-      }
-      continue;
-    }
-
-    if (event.stepId) {
-      let step = steps.get(event.stepId);
-
-      if (!step) {
-        step = {
-          id: event.stepId,
-          title: event.stepTitle ?? "当前步骤",
-          event: {
-            ...event,
-            id: `${event.stepId}:placeholder`,
-            title: event.stepTitle ?? "当前步骤",
-            detail: undefined,
-            flowKind: "todo",
-            type: "todo.updated"
-          },
-          children: []
-        };
-        steps.set(event.stepId, step);
-        items.push({ kind: "step", step });
-      }
-
-      step.children.push(event);
-      continue;
-    }
-
-    items.push({ kind: "event", event });
-  }
-
-  return items;
+      {planning.todos.length > 0 ? (
+        <div className="mt-4 space-y-3 pl-8">
+          {planning.todos.map((todo, index) => (
+            <div className="rounded-md bg-background/45 px-3 py-2" key={todo.id}>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
+                <p className="text-sm font-medium text-foreground">{todo.title}</p>
+              </div>
+              {todo.description ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{todo.description}</p> : null}
+              {todo.expectedOutput ? <MetaLine label="预期输出" value={todo.expectedOutput} /> : null}
+              {todo.doneCriteria.length > 0 ? <MetaLine label="完成标准" value={todo.doneCriteria.join("；")} /> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </details>
+  );
 }
 
-function StepGroup({ children, step }: { children: ReactNode[]; step: FlowStep }) {
+function TodoBlock({
+  index,
+  onOpenArtifact,
+  selectedArtifactId,
+  todo
+}: {
+  index: number;
+  onOpenArtifact: (artifactId: string) => void;
+  selectedArtifactId?: string;
+  todo: RunFlowTodo;
+}) {
   return (
-    <div className="rounded-lg bg-card/55 p-3 shadow-[var(--shadow-soft)]">
-      <ProgressEvent event={step.event} />
-      <div className="ml-2 mt-3 space-y-2 border-l border-border/45 pl-6">
-        {children.length === 0 ? <p className="text-xs text-muted-foreground">等待步骤内输出...</p> : children}
+    <details className="group rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]" open={todo.status === "in_progress"}>
+      <summary className="flex cursor-pointer list-none items-start gap-3">
+        <StatusDot status={todo.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium text-foreground">Todo {index + 1}</p>
+            <span className="text-sm text-muted-foreground">·</span>
+            <p className="min-w-0 text-sm font-medium text-foreground">{todo.title}</p>
+            <Badge variant={todo.status === "completed" ? "success" : todo.status === "failed" ? "warning" : "outline"}>
+              {todo.status}
+            </Badge>
+          </div>
+          {todo.summary ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{todo.summary}</p> : null}
+          {!todo.summary && todo.description ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{todo.description}</p> : null}
+        </div>
+      </summary>
+
+      <div className="mt-4">
+        {todo.summary ? (
+          <div className="rounded-md bg-background/45 px-3 py-2">
+            <p className="text-xs font-medium text-muted-foreground">Summary</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{todo.summary}</p>
+          </div>
+        ) : null}
+        {todo.actions.length > 0 ? <ActionList actions={todo.actions} /> : null}
+        {todo.artifacts.length > 0 ? (
+          <ArtifactList artifacts={todo.artifacts} onOpenArtifact={onOpenArtifact} selectedArtifactId={selectedArtifactId} />
+        ) : null}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -419,21 +415,69 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-function ProgressEvent({ event }: { event: RunEvent }) {
-  if (event.type === "message.created" || event.type === "run.completed") {
-    return null;
-  }
-
-  const isDone = event.status === "done" || event.status === "completed";
-  const isTool = event.type.startsWith("tool.");
-
+function FinalMessage({ message }: { message: ChatMessage }) {
   return (
-    <ProgressLine
-      detail={event.detail}
-      icon={isDone ? <Check className="size-4" /> : isTool ? <Wrench className="size-4" /> : <Circle className="size-4" />}
-      tone={isDone ? "done" : isTool ? "tool" : "pending"}
-      title={event.title}
-    />
+    <div className="rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]">
+      <div className="flex items-center gap-3">
+        <CheckCircle2 className="size-5 text-emerald-300" />
+        <p className="font-medium text-foreground">Final</p>
+      </div>
+      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">{message.content}</p>
+    </div>
+  );
+}
+
+function ActionList({ actions }: { actions: RunFlowAction[] }) {
+  return (
+    <div className="mt-4 space-y-2 pl-8">
+      {actions.map((action) => (
+        <ActionLine action={action} key={action.id} />
+      ))}
+    </div>
+  );
+}
+
+function ActionLine({ action }: { action: RunFlowAction }) {
+  return (
+    <details className="group rounded-md bg-background/45 px-3 py-2">
+      <summary className="flex cursor-pointer list-none items-start gap-3 text-sm">
+        <StatusIcon status={action.status} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-medium text-foreground">{action.title}</span>
+            {action.durationMs !== undefined ? <span className="text-xs text-muted-foreground">{action.durationMs}ms</span> : null}
+          </div>
+          {action.detail ? <p className="mt-1 break-words text-muted-foreground">{action.detail}</p> : null}
+        </div>
+      </summary>
+      <div className="mt-2 pl-8 text-xs leading-5 text-muted-foreground">
+        {action.toolName ? <p>tool: {action.toolName}</p> : null}
+        <p>events: {action.eventIds.join(", ")}</p>
+      </div>
+    </details>
+  );
+}
+
+function ArtifactList({
+  artifacts,
+  onOpenArtifact,
+  selectedArtifactId
+}: {
+  artifacts: Artifact[];
+  onOpenArtifact: (artifactId: string) => void;
+  selectedArtifactId?: string;
+}) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-2 pl-8">
+      {artifacts.map((artifact) => (
+        <ArtifactEvent
+          artifact={artifact}
+          isSelected={artifact.id === selectedArtifactId}
+          key={artifact.id}
+          onOpenArtifact={onOpenArtifact}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -469,12 +513,46 @@ function ProgressLine({
   );
 }
 
-function RunStatusLine({ icon, text, tone }: { icon: ReactNode; text: string; tone: "done" | "failed" }) {
+function StatusDot({ status }: { status: "running" | RunFlowTodo["status"] }) {
   return (
-    <div className={`flex items-center gap-2 text-sm ${tone === "done" ? "text-emerald-400" : "text-destructive"}`}>
-      {icon}
-      {text}
+    <div
+      className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full ${
+        status === "completed"
+          ? "bg-emerald-500/15 text-emerald-300"
+          : status === "failed"
+            ? "bg-destructive/15 text-destructive"
+            : "bg-muted/80 text-muted-foreground"
+      }`}
+    >
+      {status === "completed" ? (
+        <Check className="size-4" />
+      ) : status === "failed" ? (
+        <XCircle className="size-4" />
+      ) : (
+        <Circle className="size-4" />
+      )}
     </div>
+  );
+}
+
+function StatusIcon({ status }: { status: RunFlowAction["status"] }) {
+  if (status === "completed") {
+    return <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-300" />;
+  }
+
+  if (status === "failed") {
+    return <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" />;
+  }
+
+  return <Wrench className="mt-0.5 size-4 shrink-0 text-sky-300" />;
+}
+
+function MetaLine({ label, value }: { label: string; value: string }) {
+  return (
+    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+      <span className="font-medium text-foreground/80">{label}：</span>
+      {value}
+    </p>
   );
 }
 

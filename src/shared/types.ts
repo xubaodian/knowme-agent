@@ -227,8 +227,78 @@ export type RunEvent = {
   actions?: AgentFlowAction[];
   payload?: {
     artifact?: Artifact;
+    todo?: RunEventTodoPayload;
+    plan?: RunEventPlanPayload;
+    tool?: RunEventToolPayload;
   };
 };
+
+export type RunEventTodoPayload = {
+  id: string;
+  title: string;
+  description?: string;
+  expectedOutput?: string;
+  doneCriteria?: string[];
+  status?: "pending" | "in_progress" | "completed" | "failed";
+  summary?: string;
+  outputSummary?: string;
+  artifactRefs?: string[];
+  sandboxRefs?: string[];
+  fileRefs?: string[];
+  evidenceRefs?: string[];
+  nextContext?: string;
+  missingCriteria?: string[];
+};
+
+export type RunEventPlanPayload = {
+  goal?: string;
+  todoCount?: number;
+  todoIds?: string[];
+};
+
+export type RunEventToolPayload = {
+  name: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  status: "running" | "completed" | "failed";
+  durationMs?: number;
+  resource?: RunEventWorkbenchResource;
+};
+
+export type RunEventWorkbenchResource =
+  | {
+      kind: "file";
+      title: string;
+      path: string;
+      summary?: string;
+    }
+  | {
+      kind: "file_list";
+      title: string;
+      root?: string;
+      files: string[];
+      summary?: string;
+    }
+  | {
+      kind: "browser";
+      title: string;
+      url: string;
+      screenshotUrl?: string;
+      summary?: string;
+    }
+  | {
+      kind: "command";
+      title: string;
+      command?: string;
+      exitCode?: number | null;
+      summary?: string;
+    }
+  | {
+      kind: "note";
+      title: string;
+      recordId?: string;
+      summary?: string;
+    };
 
 export type ChatTimelineResponse = {
   chat: ChatSession;

@@ -99,7 +99,7 @@ export class AgentOrchestrator {
       detail: "Agent Runtime 已启动，正在准备 LLM、Skill 和工具执行环境。",
       status: "running",
       flowKind: "status",
-      visibility: "secondary"
+      visibility: "debug"
     });
 
     const llmStatus = llmProvider.getStatus();
@@ -118,7 +118,7 @@ export class AgentOrchestrator {
         : llmStatus.reason,
       status: llmStatus.configured ? "done" : "failed",
       flowKind: llmStatus.configured ? "thought" : "error",
-      visibility: "primary"
+      visibility: llmStatus.configured ? "debug" : "primary"
     });
 
     if (!llmStatus.configured) {
@@ -139,7 +139,7 @@ export class AgentOrchestrator {
         detail: profile.mode === "skill" ? `已选择 skill：${profile.skillName}` : "未选择 skill，使用通用执行 profile。",
         status: "done",
         flowKind: "thought",
-        visibility: "secondary"
+        visibility: "debug"
       });
 
       runLogger.event("agent.execution.mode", {

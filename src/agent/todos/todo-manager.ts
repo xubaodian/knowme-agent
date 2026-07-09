@@ -29,21 +29,27 @@ export class TodoManager {
 
     const previousById = new Map(this.todos.map((todo) => [todo.id, todo]));
     const nextTodos = todos.map(cloneTodo);
+    const eventsToEmit: Array<{ type: "todo.created" | "todo.updated"; todo: Todo }> = [];
 
     for (const todo of nextTodos) {
       const previous = previousById.get(todo.id);
 
       if (!previous) {
-        this.emitTodoEvent("todo.created", todo);
+        eventsToEmit.push({ type: "todo.created", todo });
         continue;
       }
 
       if (hasTodoChanged(previous, todo)) {
-        this.emitTodoEvent("todo.updated", todo);
+        eventsToEmit.push({ type: "todo.updated", todo });
       }
     }
 
     this.todos = nextTodos;
+
+    for (const event of eventsToEmit) {
+      this.emitTodoEvent(event.type, event.todo);
+    }
+
     return this.getSnapshot();
   }
 
@@ -95,7 +101,15 @@ export class TodoManager {
       detail: formatTodoDetail(todo),
       status: mapTodoStatus(todo.status),
       flowKind: "todo",
-      visibility: "primary"
+      visibility: "primary",
+      payload: {
+        todo: toTodoPayload(todo),
+        plan: {
+          goal: this.goal,
+          todoCount: this.todos.length,
+          todoIds: this.todos.map((item) => item.id)
+        }
+      }
     });
   }
 }
@@ -271,6 +285,25 @@ function cloneTodo(todo: Todo): Todo {
     sandboxRefs: todo.sandboxRefs ? [...todo.sandboxRefs] : undefined,
     fileRefs: todo.fileRefs ? [...todo.fileRefs] : undefined,
     evidenceRefs: todo.evidenceRefs ? [...todo.evidenceRefs] : undefined,
+    missingCriteria: todo.missingCriteria ? [...todo.missingCriteria] : undefined
+  };
+}
+
+function toTodoPayload(todo: Todo) {
+  return {
+    id: todo.id,
+    title: todo.title,
+    description: todo.description,
+    expectedOutput: todo.expectedOutput,
+    doneCriteria: [...todo.doneCriteria],
+    status: todo.status,
+    summary: todo.summary,
+    outputSummary: todo.outputSummary,
+    artifactRefs: todo.artifactRefs ? [...todo.artifactRefs] : undefined,
+    sandboxRefs: todo.sandboxRefs ? [...todo.sandboxRefs] : undefined,
+    fileRefs: todo.fileRefs ? [...todo.fileRefs] : undefined,
+    evidenceRefs: todo.evidenceRefs ? [...todo.evidenceRefs] : undefined,
+    nextContext: todo.nextContext,
     missingCriteria: todo.missingCriteria ? [...todo.missingCriteria] : undefined
   };
 }

@@ -50,6 +50,43 @@ export function ArtifactRenderer({ artifact }: { artifact: Artifact }) {
   }
 }
 
+export type ArtifactDownload = {
+  href: string;
+  fileName: string;
+};
+
+export function getArtifactDownload(artifact: Artifact): ArtifactDownload | undefined {
+  const fileName = getArtifactFileName(artifact);
+
+  switch (artifact.kind) {
+    case "markdown":
+    case "text":
+      return createTextDownload(artifact.content, fileName, artifact.kind === "markdown" ? "text/markdown" : "text/plain");
+    case "code":
+      return createTextDownload(artifact.content, fileName, "text/plain");
+    case "html":
+      return createTextDownload(artifact.content, fileName, "text/html");
+    case "json":
+      return createTextDownload(`${JSON.stringify(artifact.value, null, 2)}\n`, fileName, "application/json");
+    case "table":
+      return createTextDownload(tableToCsv(artifact), fileName, "text/csv");
+    case "slides":
+      return createTextDownload(`${JSON.stringify(artifact.slides, null, 2)}\n`, fileName, "application/json");
+    case "chart":
+      return createTextDownload(
+        `${JSON.stringify({ chartType: artifact.chartType, series: artifact.series, unit: artifact.unit }, null, 2)}\n`,
+        fileName,
+        "application/json"
+      );
+    case "image":
+      return artifact.url ? { href: artifact.url, fileName } : undefined;
+    case "pdf":
+      return artifact.url ? { href: artifact.url, fileName } : undefined;
+    case "file":
+      return artifact.url ? { href: artifact.url, fileName } : undefined;
+  }
+}
+
 export function ArtifactKindIcon({ artifact }: { artifact: Artifact }) {
   const className = "size-4";
 
@@ -87,15 +124,15 @@ function TextArtifactPreview({ artifact }: { artifact: TextArtifact }) {
 
 function CodeArtifactPreview({ artifact }: { artifact: CodeArtifact }) {
   return (
-    <div className="h-full bg-code text-code-foreground">
-      <div className="flex h-10 items-center justify-between bg-white/5 px-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-code text-code-foreground">
+      <div className="flex h-10 shrink-0 items-center justify-between bg-white/5 px-4">
         <span className="text-xs font-medium uppercase tracking-wide text-white/60">{artifact.language}</span>
         <Badge className="text-white/70" variant="outline">
           code
         </Badge>
       </div>
-      <pre className="overflow-auto p-5 text-sm leading-6">
-        <code>{artifact.content}</code>
+      <pre className="min-h-0 flex-1 overflow-auto bg-code p-5 text-sm leading-6">
+        <code className="block min-w-max">{artifact.content}</code>
       </pre>
     </div>
   );
@@ -215,8 +252,8 @@ function ChartArtifactPreview({ artifact }: { artifact: ChartArtifact }) {
 
 function JsonArtifactPreview({ artifact }: { artifact: JsonArtifact }) {
   return (
-    <pre className="overflow-auto bg-code p-5 text-sm leading-6 text-code-foreground">
-      <code>{JSON.stringify(artifact.value, null, 2)}</code>
+    <pre className="h-full overflow-auto bg-code p-5 text-sm leading-6 text-code-foreground">
+      <code className="block min-w-max">{JSON.stringify(artifact.value, null, 2)}</code>
     </pre>
   );
 }
@@ -298,4 +335,94 @@ function formatBytes(size: number) {
   }
 
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getArtifactFileName(artifact: Artifact): string {
+  if (artifact.kind === "file") {
+    return artifact.fileName || artifact.title;
+  }
+
+  if (artifact.kind === "pdf") {
+    return artifact.fileName || ensureExtension(artifact.title, "pdf");
+  }
+
+  return ensureExtension(artifact.title, extensionForArtifact(artifact));
+}
+
+function extensionForArtifact(artifact: Artifact): string {
+  switch (artifact.kind) {
+    case "markdown":
+      return "md";
+    case "text":
+      return "txt";
+    case "code":
+      return extensionForLanguage(artifact.language);
+    case "html":
+      return "html";
+    case "image":
+      return "png";
+    case "slides":
+    case "chart":
+    case "json":
+      return "json";
+    case "table":
+      return "csv";
+    case "pdf":
+      return "pdf";
+    case "file":
+      return "bin";
+  }
+}
+
+function extensionForLanguage(language: string) {
+  const normalized = language.toLowerCase();
+
+  if (normalized.includes("javascript") || normalized === "js" || normalized === "node") {
+    return "js";
+  }
+
+  if (normalized.includes("typescript") || normalized === "ts") {
+    return "ts";
+  }
+
+  if (normalized.includes("python") || normalized === "py") {
+    return "py";
+  }
+
+  if (normalized.includes("css")) {
+    return "css";
+  }
+
+  return "txt";
+}
+
+function ensureExtension(title: string, extension: string) {
+  const normalizedTitle = title.trim() || "artifact";
+  const lastSegment = normalizedTitle.split(/[\\/]/u).at(-1) ?? normalizedTitle;
+
+  if (/\.[a-z0-9]{1,8}$/iu.test(lastSegment)) {
+    return normalizedTitle;
+  }
+
+  return normalizedTitle.toLowerCase().endsWith(`.${extension}`) ? normalizedTitle : `${normalizedTitle}.${extension}`;
+}
+
+function createTextDownload(content: string, fileName: string, mimeType: string): ArtifactDownload {
+  return {
+    href: `data:${mimeType};charset=utf-8,${encodeURIComponent(content)}`,
+    fileName
+  };
+}
+
+function tableToCsv(artifact: TableArtifact) {
+  const rows = [
+    artifact.columns.map((column) => column.label),
+    ...artifact.rows.map((row) => artifact.columns.map((column) => String(row[column.key] ?? "")))
+  ];
+
+  return rows.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
+function escapeCsvCell(value: string) {
+  return /[",\n]/u.test(value) ? `"${value.replaceAll("\"", "\"\"")}"` : value;
 }

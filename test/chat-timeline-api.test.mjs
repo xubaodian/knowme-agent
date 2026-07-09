@@ -51,7 +51,7 @@ test("chat timeline API returns persisted messages, runs, events, and artifacts"
             chatId,
             userMessageId,
             status: "completed",
-            model: "moonshotai/kimi-k2.6",
+            model: "moonshotai/kimi-k2.7-code",
             skillName: "html-report",
             createdAt: "2026-06-19T08:00:01.000Z",
             updatedAt: "2026-06-19T08:00:04.000Z",

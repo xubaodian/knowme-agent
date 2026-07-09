@@ -312,8 +312,10 @@ export function App() {
             <ResizablePanel defaultSize={44} minSize={30}>
               <SandboxPanel
                 activeRun={activeRun}
+                artifacts={activeRun ? artifactsByRun[activeRun.id] ?? [] : []}
                 events={activeRunEvents}
                 onCloseArtifact={() => setSelectedArtifactId(undefined)}
+                onOpenArtifact={setSelectedArtifactId}
                 selectedArtifact={selectedArtifact}
               />
             </ResizablePanel>
