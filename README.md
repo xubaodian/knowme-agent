@@ -3,6 +3,9 @@
 一个本地可运行的 Agent 工作台：将用户任务组织为可观察、可追溯的执行 Run，而不只是一次模型对话。用户可以选择模型和 Skill，查看任务规划、Todo 与工具执行，在工作区预览文件和浏览器结果，并获得可复用的 Artifact。
 
 > **项目说明**：本项目的产品功能设计由我主导，编码和架构设计原则有我制定，部分架构设计与技术决策其制定；具体代码实现由 Codex 完成。这是一次以清晰产品意图和工程边界驱动的 AI 协作开发实践。
+> ![产品截图](docs/assets/product-screenshot.png)
+
+## Architecture
 
 ![knowme-agent architecture](docs/assets/knowme-agent-architecture.svg)
 
