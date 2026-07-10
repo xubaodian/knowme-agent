@@ -1,8 +1,8 @@
-import { Bot, Check, CheckCircle2, Circle, CircleDotDashed, Image as ImageIcon, Paperclip, Send, Wrench, XCircle } from "lucide-react";
+import { Bot, Check, CheckCircle2, Image as ImageIcon, LoaderCircle, Paperclip, Send, XCircle } from "lucide-react";
 import type { FormEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { buildRunFlowViewModel } from "../../shared/run-flow-view-model";
-import type { RunFlowAction, RunFlowPlanning, RunFlowTodo } from "../../shared/run-flow-view-model";
+import type { RunFlowAction, RunFlowPlanning, RunFlowTodo, RunFlowViewModel } from "../../shared/run-flow-view-model";
 import type { Artifact, ChatMessage, ChatSession, LlmModelOption, Run, RunEvent, SkillOption } from "../../shared/types";
 import { ArtifactKindIcon } from "./artifact-renderers";
 import { ModelPicker } from "./model-picker";
@@ -127,7 +127,7 @@ export function AgentStream({
   }
 
   return (
-    <section className="grid h-full min-h-0 grid-rows-[4rem_minmax(0,1fr)_auto] bg-workspace">
+    <section className="grid h-full min-h-0 min-w-0 overflow-hidden grid-rows-[4rem_minmax(0,1fr)_auto] bg-workspace">
       <header className="flex h-16 shrink-0 items-center justify-between px-6 backdrop-blur-xl">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold">knowme-agent</h2>
@@ -139,12 +139,12 @@ export function AgentStream({
       </header>
 
       <div
-        className="min-h-0 overflow-y-auto overscroll-contain"
+        className="min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain"
         data-agent-flow-scroll
         onScroll={handleFlowScroll}
         ref={flowRef}
       >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-7">
+        <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-8 px-6 py-7">
           {sortedMessages.length === 0 && sortedRuns.length === 0 ? <WelcomeCard /> : null}
 
           {sortedMessages.map((message) => {
@@ -230,7 +230,7 @@ export function AgentStream({
 function UserPrompt({ message }: { message: ChatMessage }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[82%] rounded-lg bg-user-message px-5 py-3 text-sm leading-6 text-foreground shadow-[var(--shadow-soft)]">
+      <div className="max-w-[82%] break-words [overflow-wrap:anywhere] rounded-lg bg-user-message px-5 py-3 text-sm leading-6 text-foreground shadow-[var(--shadow-soft)]">
         {message.content}
       </div>
     </div>
@@ -280,6 +280,7 @@ function AgentRunCard({
     flow.runActions.length > 0 ||
     flow.runArtifacts.length > 0 ||
     flow.finalMessages.length > 0;
+  const isRunning = run.status === "queued" || run.status === "running";
 
   return (
     <div className="flex gap-3">
@@ -295,8 +296,10 @@ function AgentRunCard({
           </p>
         </div>
 
+        {isRunning ? <RunActivity events={events} flow={flow} /> : null}
+
         <div className="space-y-3">
-          {!hasVisibleWork ? <ProgressLine icon={<CircleDotDashed className="size-4" />} title="正在等待执行进展" detail={run.id} /> : null}
+          {!hasVisibleWork ? <ProgressLine icon={<LoaderCircle className="size-4 animate-spin" />} title="正在等待执行进展" detail={run.id} /> : null}
           {flow.planning ? <PlanningBlock planning={flow.planning} /> : null}
           {flow.todos.map((todo, index) => (
             <TodoBlock
@@ -325,6 +328,34 @@ function AgentRunCard({
   );
 }
 
+function RunActivity({ events, flow }: { events: RunEvent[]; flow: RunFlowViewModel }) {
+  const actions = [...flow.runActions, ...flow.todos.flatMap((todo) => todo.actions)];
+  const activeAction = [...actions].reverse().find((action) => action.status === "running");
+  const activeTodo = flow.todos.find((todo) => todo.status === "in_progress");
+  const activeEvent = [...events]
+    .sort((a, b) => a.sequence - b.sequence)
+    .reverse()
+    .find((event) => event.status === "running" || event.status === "in_progress");
+  const title = activeAction
+    ? `正在执行 ${activeAction.title}`
+    : activeTodo
+      ? `正在处理：${activeTodo.title}`
+      : activeEvent?.title ?? "正在准备执行";
+  const detail = activeAction?.detail ?? activeTodo?.summary ?? activeEvent?.detail ?? "正在接收执行结果…";
+
+  return (
+    <div aria-live="polite" className="flex min-w-0 items-start gap-3 rounded-lg bg-primary/8 px-4 py-3 text-sm">
+      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
+        <LoaderCircle className="size-4 animate-spin" />
+      </span>
+      <div className="min-w-0">
+        <p className="break-words font-medium text-foreground">{title}</p>
+        <p className="mt-1 break-words [overflow-wrap:anywhere] text-xs leading-5 text-muted-foreground">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
 function PlanningBlock({ planning }: { planning: RunFlowPlanning }) {
   return (
     <details className="group rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]" open={planning.status === "running"}>
@@ -347,7 +378,7 @@ function PlanningBlock({ planning }: { planning: RunFlowPlanning }) {
                 <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
                 <p className="text-sm font-medium text-foreground">{todo.title}</p>
               </div>
-              {todo.description ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{todo.description}</p> : null}
+              {todo.description ? <p className="mt-1 break-words [overflow-wrap:anywhere] text-sm leading-6 text-muted-foreground">{todo.description}</p> : null}
               {todo.expectedOutput ? <MetaLine label="预期输出" value={todo.expectedOutput} /> : null}
               {todo.doneCriteria.length > 0 ? <MetaLine label="完成标准" value={todo.doneCriteria.join("；")} /> : null}
             </div>
@@ -391,7 +422,7 @@ function TodoBlock({
         {todo.summary ? (
           <div className="rounded-md bg-background/45 px-3 py-2">
             <p className="text-xs font-medium text-muted-foreground">Summary</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{todo.summary}</p>
+            <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-foreground">{todo.summary}</p>
           </div>
         ) : null}
         {todo.actions.length > 0 ? <ActionList actions={todo.actions} /> : null}
@@ -409,7 +440,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
       <AgentAvatar />
       <div className="min-w-0 flex-1 space-y-3">
         <AgentName />
-        <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{message.content}</p>
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-foreground">{message.content}</p>
       </div>
     </div>
   );
@@ -422,7 +453,7 @@ function FinalMessage({ message }: { message: ChatMessage }) {
         <CheckCircle2 className="size-5 text-emerald-300" />
         <p className="font-medium text-foreground">Final</p>
       </div>
-      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">{message.content}</p>
+      <p className="mt-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-foreground">{message.content}</p>
     </div>
   );
 }
@@ -529,7 +560,7 @@ function StatusDot({ status }: { status: "running" | RunFlowTodo["status"] }) {
       ) : status === "failed" ? (
         <XCircle className="size-4" />
       ) : (
-        <Circle className="size-4" />
+        <LoaderCircle className="size-4 animate-spin" />
       )}
     </div>
   );
@@ -544,14 +575,14 @@ function StatusIcon({ status }: { status: RunFlowAction["status"] }) {
     return <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" />;
   }
 
-  return <Wrench className="mt-0.5 size-4 shrink-0 text-sky-300" />;
+  return <LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin text-sky-300" />;
 }
 
 function MetaLine({ label, value }: { label: string; value: string }) {
   return (
     <p className="mt-1 text-xs leading-5 text-muted-foreground">
       <span className="font-medium text-foreground/80">{label}：</span>
-      {value}
+      <span className="break-words [overflow-wrap:anywhere]">{value}</span>
     </p>
   );
 }

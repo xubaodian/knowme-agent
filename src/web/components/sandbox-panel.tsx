@@ -7,10 +7,6 @@ import {
   Maximize2,
   Minimize2,
   Monitor,
-  Play,
-  Search,
-  Square,
-  StickyNote,
   Terminal,
   X
 } from "lucide-react";
@@ -23,6 +19,7 @@ import { ArtifactKindIcon, ArtifactRenderer, getArtifactDownload } from "./artif
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 export function SandboxPanel({
   activeRun,
@@ -52,20 +49,13 @@ export function SandboxPanel({
         : undefined,
     [activeRun, artifacts, events, selectedArtifact]
   );
-  const latestResource = flow?.workbenchResources.at(-1);
-  const pendingApproval = useMemo(
-    () =>
-      [...events]
-        .reverse()
-        .find((event) => event.type === "approval.requested" && event.status !== "done" && event.status !== "completed"),
-    [events]
-  );
+  const latestBrowserResource = [...(flow?.workbenchResources ?? [])].reverse().find((resource) => resource.kind === "browser");
   const selectedDownload = selectedArtifact ? getArtifactDownload(selectedArtifact) : undefined;
   const subtitle = selectedArtifact
     ? `正在预览 ${selectedArtifact.title}`
-    : latestResource
-      ? latestResource.summary ?? latestResource.title
-      : "文件、浏览器、资料整理和确认操作会出现在这里";
+    : latestBrowserResource
+      ? latestBrowserResource.summary ?? latestBrowserResource.title
+      : "浏览器操作和沙箱产物会显示在这里";
 
   return (
     <aside
@@ -117,40 +107,11 @@ export function SandboxPanel({
             <PreviewFrame artifact={selectedArtifact} />
           ) : (
             <WorkbenchHome
-              activeRun={activeRun}
               artifacts={artifacts}
               onOpenArtifact={onOpenArtifact}
               resources={flow?.workbenchResources ?? []}
             />
           )}
-        </div>
-
-        <div className="glass-panel mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{pendingApproval ? "等待用户确认" : "沙箱可直接操作"}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {pendingApproval
-                ? pendingApproval.detail ?? "完成必要操作后继续执行。"
-                : "浏览器、文件预览和资料面板可直接交互。"}
-            </p>
-          </div>
-          {pendingApproval ? (
-            <div className="flex items-center gap-2">
-              <Button size="sm" type="button">
-                <Play className="size-4" />
-                继续执行
-              </Button>
-              <Button size="sm" type="button" variant="ghost">
-                <Square className="size-4" />
-                停止
-              </Button>
-            </div>
-          ) : activeRun?.status === "running" ? (
-            <Button size="sm" type="button" variant="ghost">
-              <Square className="size-4" />
-              停止
-            </Button>
-          ) : null}
         </div>
       </div>
     </aside>
@@ -194,81 +155,103 @@ const PreviewFrame = memo(function PreviewFrame({ artifact }: { artifact: Artifa
 });
 
 const WorkbenchHome = memo(function WorkbenchHome({
-  activeRun,
   artifacts,
   onOpenArtifact,
   resources
 }: {
-  activeRun?: Run;
   artifacts: Artifact[];
   onOpenArtifact: (artifactId: string) => void;
   resources: RunWorkbenchResource[];
 }) {
-  const { commandResources, fileResources, latestBrowser, noteResources } = useMemo(
+  const { codeArtifacts, commandResources, fileArtifacts, latestBrowser } = useMemo(
     () => ({
       latestBrowser: [...resources].reverse().find((resource) => resource.kind === "browser"),
-      fileResources: resources.filter((resource) => resource.kind === "file" || resource.kind === "file_list"),
-      noteResources: resources.filter((resource) => resource.kind === "note"),
-      commandResources: resources.filter((resource) => resource.kind === "command").slice(-4).reverse()
+      commandResources: resources.filter((resource) => resource.kind === "command"),
+      codeArtifacts: artifacts.filter(isCodeArtifact),
+      fileArtifacts: artifacts.filter(isSupportedFileArtifact)
     }),
-    [resources]
+    [artifacts, resources]
   );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="bg-card/45 px-4 py-3">
-        <h3 className="text-sm font-semibold">Sandbox Workbench</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{activeRun ? activeRun.id : "No active run"}</p>
-      </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-4 p-4">
-          {!latestBrowser && fileResources.length === 0 && noteResources.length === 0 && artifacts.length === 0 ? (
-            <EmptyWorkbench />
-          ) : null}
+      <Tabs className="flex min-h-0 flex-1 flex-col" defaultValue="browser">
+        <div className="shrink-0 border-b border-border px-3 pt-3">
+          <TabsList className="h-9 w-full justify-start gap-1 overflow-x-auto rounded-b-none bg-transparent p-0">
+            <TabsTrigger className="shrink-0 px-3 text-xs" value="browser">
+              <Globe2 className="size-3.5" />
+              浏览器
+            </TabsTrigger>
+            <TabsTrigger className="shrink-0 px-3 text-xs" value="code">
+              <Code2 className="size-3.5" />
+              代码
+            </TabsTrigger>
+            <TabsTrigger className="shrink-0 px-3 text-xs" value="files">
+              <FileText className="size-3.5" />
+              文件
+            </TabsTrigger>
+            <TabsTrigger className="shrink-0 px-3 text-xs" value="scripts">
+              <Terminal className="size-3.5" />
+              执行脚本
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-          {latestBrowser ? <BrowserSurface resource={latestBrowser} /> : null}
+        <TabsContent className="mt-0 min-h-0 flex-1" value="browser">
+          <WorkbenchScroll>
+            {latestBrowser ? <BrowserSurface resource={latestBrowser} /> : <EmptyTab description="浏览器导航、点击与截图会显示在这里。" />}
+          </WorkbenchScroll>
+        </TabsContent>
 
-          {fileResources.length > 0 || artifacts.length > 0 ? (
-            <WorkbenchSection icon={<FileText className="size-4" />} title="文件与产物">
+        <TabsContent className="mt-0 min-h-0 flex-1" value="code">
+          <WorkbenchScroll>
+            {codeArtifacts.length > 0 ? (
               <div className="space-y-2">
-                {fileResources.slice(-6).reverse().map((resource) => (
-                  <ResourceRow key={resource.id} resource={resource} />
-                ))}
-                {artifacts.map((artifact) => (
+                {codeArtifacts.map((artifact) => (
                   <ArtifactRow artifact={artifact} key={artifact.id} onOpenArtifact={onOpenArtifact} />
                 ))}
               </div>
-            </WorkbenchSection>
-          ) : null}
+            ) : (
+              <EmptyTab description="已发布的代码、HTML 和 JSON 产物会显示在这里。" />
+            )}
+          </WorkbenchScroll>
+        </TabsContent>
 
-          {noteResources.length > 0 ? (
-            <WorkbenchSection icon={<Search className="size-4" />} title="资料整理">
+        <TabsContent className="mt-0 min-h-0 flex-1" value="files">
+          <WorkbenchScroll>
+            {fileArtifacts.length > 0 ? (
               <div className="space-y-2">
-                {noteResources.slice(-6).reverse().map((resource) => (
-                  <ResourceRow key={resource.id} resource={resource} />
+                {fileArtifacts.map((artifact) => (
+                  <ArtifactRow artifact={artifact} key={artifact.id} onOpenArtifact={onOpenArtifact} />
                 ))}
               </div>
-            </WorkbenchSection>
-          ) : null}
+            ) : (
+              <EmptyTab description="已发布的 TXT、截图、PPT 和 PDF 产物会显示在这里。" />
+            )}
+          </WorkbenchScroll>
+        </TabsContent>
 
-          {commandResources.length > 0 ? (
-            <WorkbenchSection icon={<Terminal className="size-4" />} title="执行记录">
+        <TabsContent className="mt-0 min-h-0 flex-1" value="scripts">
+          <WorkbenchScroll>
+            {commandResources.length > 0 ? (
               <div className="space-y-2">
                 {commandResources.map((resource) => (
-                  <ResourceRow key={resource.id} resource={resource} />
+                  <ScriptRow key={resource.id} resource={resource} />
                 ))}
               </div>
-            </WorkbenchSection>
-          ) : null}
-        </div>
-      </ScrollArea>
+            ) : (
+              <EmptyTab description="所有在沙箱中执行的 Shell、Node.js 和 Python 脚本会显示在这里。" />
+            )}
+          </WorkbenchScroll>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 });
 
 const BrowserSurface = memo(function BrowserSurface({ resource }: { resource: RunWorkbenchResource }) {
   return (
-    <WorkbenchSection icon={<Globe2 className="size-4" />} title="浏览器">
+    <div className="rounded-lg bg-background/45 p-3 shadow-[var(--shadow-soft)]">
       <div className="overflow-hidden rounded-md bg-background/55">
         {resource.kind === "browser" && resource.screenshotUrl ? (
           <img alt={resource.title} className="max-h-72 w-full object-contain" src={resource.screenshotUrl} />
@@ -283,50 +266,17 @@ const BrowserSurface = memo(function BrowserSurface({ resource }: { resource: Ru
         )}
       </div>
       {resource.summary ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{resource.summary}</p> : null}
-    </WorkbenchSection>
-  );
-});
-
-function WorkbenchSection({ children, icon, title }: { children: ReactNode; icon: ReactNode; title: string }) {
-  return (
-    <section className="rounded-lg bg-background/45 p-3 shadow-[var(--shadow-soft)]">
-      <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-        <span className="text-muted-foreground">{icon}</span>
-        {title}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-const ResourceRow = memo(function ResourceRow({ resource }: { resource: RunWorkbenchResource }) {
-  const icon =
-    resource.kind === "command" ? (
-      <Terminal className="size-4" />
-    ) : resource.kind === "note" ? (
-      <StickyNote className="size-4" />
-    ) : resource.kind === "browser" ? (
-      <Globe2 className="size-4" />
-    ) : (
-      <Code2 className="size-4" />
-    );
-
-  return (
-    <div className="rounded-md bg-card/50 px-3 py-2">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-muted-foreground">{icon}</span>
-          <span className="truncate text-sm font-medium">{resource.title}</span>
-        </div>
-        <Badge variant={resource.status === "failed" ? "warning" : "outline"}>{resource.kind}</Badge>
-      </div>
-      {resource.kind === "file_list" && resource.files.length > 0 ? (
-        <p className="mt-1 truncate text-xs text-muted-foreground">{resource.files.slice(0, 5).join(", ")}</p>
-      ) : null}
-      {resource.summary ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{resource.summary}</p> : null}
     </div>
   );
 });
+
+function WorkbenchScroll({ children }: { children: ReactNode }) {
+  return (
+    <ScrollArea className="h-full">
+      <div className="p-4">{children}</div>
+    </ScrollArea>
+  );
+}
 
 const ArtifactRow = memo(function ArtifactRow({ artifact, onOpenArtifact }: { artifact: Artifact; onOpenArtifact: (artifactId: string) => void }) {
   const download = getArtifactDownload(artifact);
@@ -354,16 +304,80 @@ const ArtifactRow = memo(function ArtifactRow({ artifact, onOpenArtifact }: { ar
   );
 });
 
-function EmptyWorkbench() {
+function EmptyTab({ description }: { description: string }) {
   return (
     <div className="grid min-h-72 place-items-center text-center">
       <div>
         <Monitor className="mx-auto mb-3 size-10 text-muted-foreground" />
         <h3 className="text-sm font-semibold">等待沙箱活动</h3>
-        <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">
-          文件、浏览器、资料整理、截图和确认操作会集中在这里。普通回复和完成日志不会进入工作台。
-        </p>
+        <p className="mt-1 max-w-sm text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
     </div>
   );
+}
+
+const ScriptRow = memo(function ScriptRow({ resource }: { resource: RunWorkbenchResource }) {
+  if (resource.kind !== "command") {
+    return null;
+  }
+
+  const statusLabel = resource.status === "completed" ? "完成" : resource.status === "failed" ? "失败" : "执行中";
+
+  return (
+    <article className="rounded-lg bg-background/45 p-3 shadow-[var(--shadow-soft)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Terminal className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-medium">{resource.title}</span>
+        </div>
+        <Badge variant={resource.status === "failed" ? "warning" : resource.status === "completed" ? "success" : "outline"}>{statusLabel}</Badge>
+      </div>
+      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-code px-3 py-2 text-xs leading-5 text-code-foreground">
+        <code className="whitespace-pre-wrap break-all">{resource.command ?? "未记录脚本内容"}</code>
+      </pre>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {resource.exitCode !== undefined && resource.exitCode !== null ? <span>退出码：{resource.exitCode}</span> : null}
+        {resource.summary ? <span className="break-words">{resource.summary}</span> : null}
+      </div>
+    </article>
+  );
+});
+
+function isCodeArtifact(artifact: Artifact): boolean {
+  return artifact.kind === "code" || artifact.kind === "html" || artifact.kind === "json";
+}
+
+function isSupportedFileArtifact(artifact: Artifact): boolean {
+  if (artifact.kind === "image" || artifact.kind === "pdf" || artifact.kind === "slides") {
+    return true;
+  }
+
+  if (artifact.kind === "text") {
+    return hasExtension(artifact.title, ["txt"]);
+  }
+
+  if (artifact.kind === "file") {
+    return isSupportedFilePath(artifact.fileName) || isSupportedFileMimeType(artifact.mimeType);
+  }
+
+  return false;
+}
+
+function isSupportedFilePath(path: string): boolean {
+  return hasExtension(path, ["bmp", "gif", "jpeg", "jpg", "pdf", "png", "ppt", "pptx", "svg", "txt", "webp"]);
+}
+
+function isSupportedFileMimeType(mimeType: string): boolean {
+  return (
+    mimeType === "application/pdf" ||
+    mimeType === "text/plain" ||
+    mimeType.startsWith("image/") ||
+    mimeType.includes("presentation") ||
+    mimeType.includes("powerpoint")
+  );
+}
+
+function hasExtension(fileName: string, extensions: string[]): boolean {
+  const extension = fileName.split(/[?#]/, 1)[0]?.split(".").at(-1)?.toLowerCase();
+  return Boolean(extension && extensions.includes(extension));
 }

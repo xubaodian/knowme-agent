@@ -20,6 +20,7 @@ export class ToolRunner {
   ): Promise<TOutput> {
     const tool = this.registry.get(name) as unknown as AgentTool<TInput, TOutput>;
     const inputSummary = tool.summarizeInput?.(input) ?? "执行工具调用。";
+    const startedResource = deriveScriptWorkbenchResource(tool.name, input);
     const startedAt = Date.now();
     const visibility = isInternalTool(name) ? "debug" : "primary";
     const traceNodeId = await this.context.trace?.startNode({
@@ -59,7 +60,8 @@ export class ToolRunner {
         tool: {
           name: tool.name,
           inputSummary,
-          status: "running"
+          status: "running",
+          resource: startedResource
         }
       }
     });
@@ -68,7 +70,7 @@ export class ToolRunner {
       const output = await tool.run(input, this.context);
       const outputSummary = tool.summarizeOutput?.(output) ?? output.summary ?? "工具调用完成。";
       const durationMs = Date.now() - startedAt;
-      const resource = deriveWorkbenchResource(tool.name, input, output.data, outputSummary);
+      const resource = deriveScriptWorkbenchResource(tool.name, input, output.data, outputSummary) ?? deriveWorkbenchResource(tool.name, input, output.data, outputSummary);
       span.end({
         toolName: tool.name,
         outputSummary,
@@ -117,6 +119,7 @@ export class ToolRunner {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Tool execution failed.";
       const durationMs = Date.now() - startedAt;
+      const resource = deriveScriptWorkbenchResource(tool.name, input, undefined, message);
       this.context.runLogger.event(
         "tool.run.error",
         {
@@ -154,7 +157,8 @@ export class ToolRunner {
             inputSummary,
             outputSummary: message,
             status: "failed",
-            durationMs
+            durationMs,
+            resource
           }
         }
       });
@@ -166,6 +170,19 @@ export class ToolRunner {
 
 function isInternalTool(name: string): boolean {
   return name === "plan_todos" || name === "finish_task";
+}
+
+function deriveScriptWorkbenchResource(
+  toolName: string,
+  input: unknown,
+  data?: unknown,
+  summary?: string
+): RunEventWorkbenchResource | undefined {
+  if (toolName !== "run_command" && toolName !== "run_node" && toolName !== "run_python") {
+    return undefined;
+  }
+
+  return deriveWorkbenchResource(toolName, input, data, summary);
 }
 
 function deriveWorkbenchResource(
@@ -240,7 +257,7 @@ function deriveWorkbenchResource(
     return {
       kind: "command",
       title: toolName === "run_command" ? "命令执行" : toolName === "run_node" ? "Node.js 执行" : "Python 执行",
-      command: readString(inputRecord, "command"),
+      command: readString(inputRecord, "command") ?? readString(inputRecord, "code"),
       exitCode: readNumberOrNull(dataRecord, "exitCode"),
       summary
     };

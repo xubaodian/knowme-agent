@@ -66,6 +66,12 @@ test("three-phase runtime uses narrow tools and relative run workspace paths", a
     assert.ok(events.some((event) => event.type === "tool.started" && event.title === "record_note"));
     assert.ok(events.some((event) => event.type === "tool.started" && event.title === "publish_artifact"));
     assert.ok(events.some((event) => event.type === "artifact.created"));
+    const nodeStarted = events.find((event) => event.type === "tool.started" && event.title === "run_node");
+    const nodeFinished = events.find((event) => event.type === "tool.finished" && event.title === "run_node completed");
+    assert.equal(nodeStarted?.payload?.tool?.resource?.kind, "command");
+    assert.equal(nodeStarted?.payload?.tool?.resource?.command, "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());");
+    assert.equal(nodeFinished?.payload?.tool?.resource?.kind, "command");
+    assert.equal(nodeFinished?.payload?.tool?.resource?.command, "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());");
   } finally {
     await rm(workspace.root, { recursive: true, force: true });
   }
