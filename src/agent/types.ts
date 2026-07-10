@@ -210,6 +210,12 @@ export type ToolExecutionContext = {
 export type ToolRunResult = {
   summary?: string;
   data?: unknown;
+  visualInputs?: Array<{
+    title?: string;
+    imageUrl: string;
+    detail?: "auto" | "low" | "high";
+    note?: string;
+  }>;
 };
 
 export type AgentTool<TInput = unknown, TOutput extends ToolRunResult = ToolRunResult> = {

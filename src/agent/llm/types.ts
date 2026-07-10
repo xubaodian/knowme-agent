@@ -15,9 +15,13 @@ export type LlmToolCall = {
   arguments: string;
 };
 
+export type LlmMessageContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
+
 export type LlmMessage = {
   role: LlmMessageRole;
-  content?: string;
+  content?: string | LlmMessageContentPart[];
   name?: string;
   toolCallId?: string;
   toolCalls?: LlmToolCall[];

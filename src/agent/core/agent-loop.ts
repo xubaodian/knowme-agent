@@ -13,6 +13,12 @@ export type AgentLoopToolResult = {
   ok: boolean;
   summary?: string;
   data?: unknown;
+  visualInputs?: Array<{
+    title?: string;
+    imageUrl: string;
+    detail?: "auto" | "low" | "high";
+    note?: string;
+  }>;
   error?: string;
 };
 
@@ -44,6 +50,12 @@ type ToolCallExecutionResult =
       ok: true;
       summary?: string;
       data?: unknown;
+      visualInputs?: Array<{
+        title?: string;
+        imageUrl: string;
+        detail?: "auto" | "low" | "high";
+        note?: string;
+      }>;
     }
   | {
       ok: false;
@@ -300,6 +312,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           ok: toolResult.ok,
           summary: toolResult.ok ? toolResult.summary : undefined,
           data: toolResult.ok ? toolResult.data : undefined,
+          visualInputs: toolResult.ok ? toolResult.visualInputs : undefined,
           error: toolResult.ok ? undefined : toolResult.error
         });
         if (toolResult.ok) {
@@ -328,6 +341,34 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           name: toolCall.name,
           content: serializeToolResult(toolResult)
         });
+
+        if (toolResult.ok && toolResult.visualInputs?.length) {
+          for (const visualInput of toolResult.visualInputs) {
+            messages.push({
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: [
+                    `Visual evidence from tool ${toolCall.name}.`,
+                    visualInput.title ? `Title: ${visualInput.title}` : undefined,
+                    visualInput.note,
+                    "Inspect the image directly. If this evidence shows layout, rendering, contrast, overlap, clipping, or asset problems, fix them with tools before marking the todo complete."
+                  ]
+                    .filter(Boolean)
+                    .join("\n")
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: visualInput.imageUrl,
+                    detail: visualInput.detail ?? "high"
+                  }
+                }
+              ]
+            });
+          }
+        }
       }
     }
 
@@ -410,7 +451,8 @@ async function executeToolCall(
     return {
       ok: true,
       summary: output.summary,
-      data: output.data
+      data: output.data,
+      visualInputs: output.visualInputs
     };
   } catch (error) {
     return {
@@ -429,7 +471,34 @@ function parseToolArguments(rawArguments: string): unknown {
 }
 
 function serializeToolResult(result: unknown): string {
-  return truncate(JSON.stringify(result, null, 2), 12000);
+  return truncate(
+    JSON.stringify(
+      result,
+      (key, value) => {
+        if ((key === "previewUrl" || key === "imageUrl") && typeof value === "string" && value.startsWith("data:image/")) {
+          return `[image data URL omitted from text result; image attached separately, ${value.length} chars]`;
+        }
+
+        if (key === "visualInputs" && Array.isArray(value)) {
+          return value.map((item) =>
+            item && typeof item === "object"
+              ? {
+                  ...item,
+                  imageUrl:
+                    typeof item.imageUrl === "string" && item.imageUrl.startsWith("data:image/")
+                      ? `[image data URL omitted from text result; image attached separately, ${item.imageUrl.length} chars]`
+                      : item.imageUrl
+                }
+              : item
+          );
+        }
+
+        return value;
+      },
+      2
+    ),
+    12000
+  );
 }
 
 function truncate(value: string, maxLength: number): string {

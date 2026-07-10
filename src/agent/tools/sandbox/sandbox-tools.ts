@@ -329,7 +329,8 @@ function createBrowserTypeTool(): AgentTool {
 function createBrowserScreenshotTool(): AgentTool {
   return {
     name: "browser_screenshot",
-    description: "Capture the current local browser preview screenshot.",
+    description:
+      "Capture a real PNG screenshot of the current local browser preview. The result includes a relative screenshot file path; inspect the attached image before deciding whether the visual quality is acceptable.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -341,8 +342,20 @@ function createBrowserScreenshotTool(): AgentTool {
     async run(input, context): Promise<ToolRunResult> {
       const result = await context.sandbox.browserScreenshot(input as { fullPage?: boolean });
       return {
-        summary: "浏览器截图已生成。",
-        data: result
+        summary: `浏览器截图已生成：${result.path ?? result.url}。`,
+        data: result,
+        visualInputs: result.previewUrl
+          ? [
+              {
+                title: result.path ?? "Browser screenshot",
+                imageUrl: result.previewUrl,
+                detail: "high",
+                note: result.path
+                  ? `Screenshot file path: ${result.path}. Use publish_artifact with source.type=file and this path when delivering the screenshot.`
+                  : undefined
+              }
+            ]
+          : undefined
       };
     }
   };

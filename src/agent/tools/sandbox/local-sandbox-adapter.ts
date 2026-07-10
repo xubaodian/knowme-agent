@@ -1,7 +1,10 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { chromium, type Browser, type Page } from "playwright";
 import type { BrowserScreenshot, BrowserState, CommandResult, PatchEdit, SandboxAdapter } from "./sandbox-adapter.js";
 
 const maxOutputLength = 12_000;
@@ -14,6 +17,8 @@ export class LocalSandboxAdapter implements SandboxAdapter {
     title: "Local Browser",
     updatedAt: new Date().toISOString()
   };
+  private browser?: Browser;
+  private page?: Page;
 
   constructor(private readonly root: string) {}
 
@@ -47,6 +52,16 @@ export class LocalSandboxAdapter implements SandboxAdapter {
   async readFile(input: { path: string }): Promise<{ content: string }> {
     const targetPath = this.resolveInsideRoot(input.path);
     return { content: await readFile(targetPath, "utf8") };
+  }
+
+  async readBinaryFile(input: { path: string }): Promise<{ contentBase64: string; sizeBytes: number }> {
+    const targetPath = this.resolveInsideRoot(input.path);
+    const content = await readFile(targetPath);
+
+    return {
+      contentBase64: content.toString("base64"),
+      sizeBytes: content.byteLength
+    };
   }
 
   async writeFile(input: { path: string; content: string }): Promise<{ path: string }> {
@@ -89,12 +104,15 @@ export class LocalSandboxAdapter implements SandboxAdapter {
   async browserOpenFile(input: { path: string }): Promise<BrowserState> {
     const targetPath = this.resolveInsideRoot(input.path);
     const relativePath = path.relative(this.root, targetPath);
+    const fileUrl = pathToFileURL(targetPath).href;
 
     this.browserState = {
-      url: `workspace-file://${encodeURI(relativePath)}`,
+      url: fileUrl,
       title: path.basename(relativePath) || "Local Preview",
       updatedAt: new Date().toISOString()
     };
+
+    await this.navigatePage(fileUrl);
 
     return this.browserState;
   }
@@ -116,38 +134,71 @@ export class LocalSandboxAdapter implements SandboxAdapter {
       updatedAt: new Date().toISOString()
     };
 
+    await this.navigatePage(url.href);
+
     return this.browserState;
   }
 
-  async browserScreenshot(): Promise<BrowserScreenshot> {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
-  <rect width="960" height="540" rx="0" fill="#eef4fb"/>
-  <rect x="72" y="72" width="816" height="396" rx="28" fill="#ffffff"/>
-  <text x="112" y="142" fill="#152033" font-family="Inter, system-ui" font-size="30" font-weight="700">Local Browser Snapshot</text>
-  <text x="112" y="194" fill="#667085" font-family="Inter, system-ui" font-size="22">${escapeXml(this.browserState.url)}</text>
-  <rect x="112" y="254" width="520" height="22" rx="11" fill="#d7e3ef"/>
-  <rect x="112" y="304" width="680" height="22" rx="11" fill="#e5edf5"/>
-  <rect x="112" y="354" width="420" height="22" rx="11" fill="#25d0ba" opacity="0.42"/>
-</svg>`;
+  async browserScreenshot(input: { fullPage?: boolean } = {}): Promise<BrowserScreenshot> {
+    const page = await this.ensurePage();
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined);
+    const viewport = page.viewportSize() ?? { width: 1280, height: 900 };
+    const screenshotPath = path.join("outputs", "browser-screenshots", `screenshot-${Date.now()}.png`);
+    const absolutePath = this.resolveInsideRoot(screenshotPath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    const buffer = await page.screenshot({
+      path: absolutePath,
+      fullPage: Boolean(input.fullPage),
+      type: "png"
+    });
+    const previewUrl = `data:image/png;base64,${buffer.toString("base64")}`;
 
     return {
-      url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
-      alt: `Screenshot of ${this.browserState.url}`
+      url: page.url(),
+      path: screenshotPath,
+      previewUrl,
+      mimeType: "image/png",
+      sizeBytes: buffer.byteLength,
+      width: viewport.width,
+      height: viewport.height,
+      alt: `Screenshot of ${page.url()}`
     };
   }
 
-  async browserClick(): Promise<BrowserState> {
+  async browserClick(input: { selector?: string; x?: number; y?: number } = {}): Promise<BrowserState> {
+    const page = await this.ensurePage();
+
+    if (input.selector) {
+      await page.click(input.selector);
+    } else if (typeof input.x === "number" && typeof input.y === "number") {
+      await page.mouse.click(input.x, input.y);
+    } else {
+      throw new Error("browser_click requires selector or x/y coordinates.");
+    }
+
     this.browserState = {
       ...this.browserState,
+      title: await safePageTitle(page, this.browserState.title),
+      url: page.url(),
       updatedAt: new Date().toISOString()
     };
 
     return this.browserState;
   }
 
-  async browserType(): Promise<BrowserState> {
+  async browserType(input: { selector?: string; text: string }): Promise<BrowserState> {
+    const page = await this.ensurePage();
+
+    if (input.selector) {
+      await page.fill(input.selector, input.text);
+    } else {
+      await page.keyboard.type(input.text);
+    }
+
     this.browserState = {
       ...this.browserState,
+      title: await safePageTitle(page, this.browserState.title),
+      url: page.url(),
       updatedAt: new Date().toISOString()
     };
 
@@ -155,13 +206,72 @@ export class LocalSandboxAdapter implements SandboxAdapter {
   }
 
   async browserGetDom(): Promise<{ url: string; title: string; content: string }> {
+    const page = await this.ensurePage();
+    const title = await safePageTitle(page, this.browserState.title);
+    const content = await page.locator("body").evaluate((body) => {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      const parts: string[] = [];
+
+      while (walker.nextNode() && parts.join(" ").length < 8_000) {
+        const text = walker.currentNode.textContent?.trim();
+
+        if (text) {
+          parts.push(text);
+        }
+      }
+
+      return parts.join("\n");
+    });
+
+    this.browserState = {
+      url: page.url(),
+      title,
+      updatedAt: new Date().toISOString()
+    };
+
     return {
       url: this.browserState.url,
-      title: this.browserState.title,
-      content: `<html><head><title>${escapeXml(this.browserState.title)}</title></head><body data-url="${escapeXml(
-        this.browserState.url
-      )}">Local browser simulation</body></html>`
+      title,
+      content
     };
+  }
+
+  private async navigatePage(url: string): Promise<void> {
+    const page = await this.ensurePage();
+    await page.goto(url, {
+      waitUntil: "networkidle",
+      timeout: 15_000
+    });
+    this.browserState = {
+      url: page.url(),
+      title: await safePageTitle(page, this.browserState.title),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  private async ensurePage(): Promise<Page> {
+    if (!this.browser) {
+      this.browser = await chromium.launch({
+        headless: true,
+        executablePath: findSystemChromiumExecutable()
+      });
+    }
+
+    if (!this.page || this.page.isClosed()) {
+      this.page = await this.browser.newPage({
+        viewport: { width: 1280, height: 900 },
+        deviceScaleFactor: 1
+      });
+
+      if (this.browserState.url !== "about:blank") {
+        await this.page.goto(this.browserState.url, {
+          waitUntil: "networkidle",
+          timeout: 15_000
+        });
+      }
+    }
+
+    return this.page;
   }
 
   private resolveInsideRoot(inputPath: string) {
@@ -294,10 +404,6 @@ function countOccurrences(content: string, search: string) {
   return content.split(search).length - 1;
 }
 
-function escapeXml(value: string) {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
 async function walkFiles(root: string, sandboxRoot: string, maxEntries: number): Promise<string[]> {
   const output: string[] = [];
 
@@ -330,4 +436,31 @@ async function walkFiles(root: string, sandboxRoot: string, maxEntries: number):
 
   await visit(root);
   return output;
+}
+
+async function safePageTitle(page: Page, fallback: string): Promise<string> {
+  try {
+    return (await page.title()) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function findSystemChromiumExecutable(): string | undefined {
+  const candidates =
+    process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+          "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+        ]
+      : process.platform === "win32"
+        ? [
+            "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+          ]
+        : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/microsoft-edge"];
+
+  return candidates.find((candidate) => existsSync(candidate));
 }

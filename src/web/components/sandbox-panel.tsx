@@ -15,7 +15,7 @@ import {
   X
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { buildRunFlowViewModel } from "../../shared/run-flow-view-model";
 import type { RunWorkbenchResource } from "../../shared/run-flow-view-model";
 import type { Artifact, Run, RunEvent } from "../../shared/types";
@@ -42,7 +42,7 @@ export function SandboxPanel({
   const [isExpanded, setIsExpanded] = useState(false);
   const flow = useMemo(
     () =>
-      activeRun
+      activeRun && !selectedArtifact
         ? buildRunFlowViewModel({
             run: activeRun,
             events,
@@ -50,12 +50,16 @@ export function SandboxPanel({
             assistantMessages: []
           })
         : undefined,
-    [activeRun, artifacts, events]
+    [activeRun, artifacts, events, selectedArtifact]
   );
   const latestResource = flow?.workbenchResources.at(-1);
-  const pendingApproval = [...events]
-    .reverse()
-    .find((event) => event.type === "approval.requested" && event.status !== "done" && event.status !== "completed");
+  const pendingApproval = useMemo(
+    () =>
+      [...events]
+        .reverse()
+        .find((event) => event.type === "approval.requested" && event.status !== "done" && event.status !== "completed"),
+    [events]
+  );
   const selectedDownload = selectedArtifact ? getArtifactDownload(selectedArtifact) : undefined;
   const subtitle = selectedArtifact
     ? `正在预览 ${selectedArtifact.title}`
@@ -153,7 +157,7 @@ export function SandboxPanel({
   );
 }
 
-function PreviewFrame({ artifact }: { artifact: Artifact }) {
+const PreviewFrame = memo(function PreviewFrame({ artifact }: { artifact: Artifact }) {
   const download = getArtifactDownload(artifact);
 
   return (
@@ -187,9 +191,9 @@ function PreviewFrame({ artifact }: { artifact: Artifact }) {
       </div>
     </div>
   );
-}
+});
 
-function WorkbenchHome({
+const WorkbenchHome = memo(function WorkbenchHome({
   activeRun,
   artifacts,
   onOpenArtifact,
@@ -200,10 +204,15 @@ function WorkbenchHome({
   onOpenArtifact: (artifactId: string) => void;
   resources: RunWorkbenchResource[];
 }) {
-  const latestBrowser = [...resources].reverse().find((resource) => resource.kind === "browser");
-  const fileResources = resources.filter((resource) => resource.kind === "file" || resource.kind === "file_list");
-  const noteResources = resources.filter((resource) => resource.kind === "note");
-  const commandResources = resources.filter((resource) => resource.kind === "command").slice(-4).reverse();
+  const { commandResources, fileResources, latestBrowser, noteResources } = useMemo(
+    () => ({
+      latestBrowser: [...resources].reverse().find((resource) => resource.kind === "browser"),
+      fileResources: resources.filter((resource) => resource.kind === "file" || resource.kind === "file_list"),
+      noteResources: resources.filter((resource) => resource.kind === "note"),
+      commandResources: resources.filter((resource) => resource.kind === "command").slice(-4).reverse()
+    }),
+    [resources]
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -255,9 +264,9 @@ function WorkbenchHome({
       </ScrollArea>
     </div>
   );
-}
+});
 
-function BrowserSurface({ resource }: { resource: RunWorkbenchResource }) {
+const BrowserSurface = memo(function BrowserSurface({ resource }: { resource: RunWorkbenchResource }) {
   return (
     <WorkbenchSection icon={<Globe2 className="size-4" />} title="浏览器">
       <div className="overflow-hidden rounded-md bg-background/55">
@@ -276,7 +285,7 @@ function BrowserSurface({ resource }: { resource: RunWorkbenchResource }) {
       {resource.summary ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{resource.summary}</p> : null}
     </WorkbenchSection>
   );
-}
+});
 
 function WorkbenchSection({ children, icon, title }: { children: ReactNode; icon: ReactNode; title: string }) {
   return (
@@ -290,7 +299,7 @@ function WorkbenchSection({ children, icon, title }: { children: ReactNode; icon
   );
 }
 
-function ResourceRow({ resource }: { resource: RunWorkbenchResource }) {
+const ResourceRow = memo(function ResourceRow({ resource }: { resource: RunWorkbenchResource }) {
   const icon =
     resource.kind === "command" ? (
       <Terminal className="size-4" />
@@ -317,9 +326,9 @@ function ResourceRow({ resource }: { resource: RunWorkbenchResource }) {
       {resource.summary ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{resource.summary}</p> : null}
     </div>
   );
-}
+});
 
-function ArtifactRow({ artifact, onOpenArtifact }: { artifact: Artifact; onOpenArtifact: (artifactId: string) => void }) {
+const ArtifactRow = memo(function ArtifactRow({ artifact, onOpenArtifact }: { artifact: Artifact; onOpenArtifact: (artifactId: string) => void }) {
   const download = getArtifactDownload(artifact);
 
   return (
@@ -343,7 +352,7 @@ function ArtifactRow({ artifact, onOpenArtifact }: { artifact: Artifact; onOpenA
       </div>
     </div>
   );
-}
+});
 
 function EmptyWorkbench() {
   return (

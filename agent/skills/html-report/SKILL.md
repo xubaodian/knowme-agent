@@ -35,13 +35,14 @@ Use this skill when the user asks to turn provided materials, notes, data, docum
 4. Validate visually with browser tools.
    - Use `browser_open_file` to open the generated HTML file directly from the sandbox path.
    - Do not start a local HTTP server for preview unless a future runtime explicitly provides a dedicated long-running process tool.
-   - Take at least one screenshot.
-   - Inspect for blank renders, broken assets, failed Chart.js or Font Awesome loading, overflow, clipped text, overlapping UI, weak contrast, excessive borders, old-fashioned styling, and poor mobile behavior.
+   - Take at least one real screenshot with `browser_screenshot`.
+   - Inspect the attached screenshot image itself, not only the text summary. Check for blank renders, broken assets, failed Chart.js or Font Awesome loading, overflow, clipped text, overlapping UI, weak contrast, excessive borders, old-fashioned styling, and poor mobile behavior.
    - If the screenshot reveals issues, patch the HTML/CSS and take another screenshot. Iterate until the report looks production-quality.
+   - Use the screenshot tool's returned relative PNG path as visual evidence and as the source file for the screenshot artifact.
 
 5. Publish artifacts.
    - Create an `html` artifact for the final report with preview display.
-   - Create an `image` artifact for the final screenshot with inline display.
+   - Create an `image` artifact for the final screenshot with inline display using `source: { "type": "file", "path": "<screenshot png path>" }`.
    - If source data tables or generated JSON are important for reuse, create separate artifacts for them.
 
 ## Themes

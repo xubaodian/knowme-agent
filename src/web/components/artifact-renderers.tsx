@@ -9,6 +9,7 @@ import {
   Presentation,
   Table2
 } from "lucide-react";
+import { memo } from "react";
 import type {
   Artifact,
   ChartArtifact,
@@ -24,7 +25,7 @@ import type {
 } from "../../shared/types";
 import { Badge } from "./ui/badge";
 
-export function ArtifactRenderer({ artifact }: { artifact: Artifact }) {
+export const ArtifactRenderer = memo(function ArtifactRenderer({ artifact }: { artifact: Artifact }) {
   switch (artifact.kind) {
     case "markdown":
     case "text":
@@ -48,7 +49,7 @@ export function ArtifactRenderer({ artifact }: { artifact: Artifact }) {
     case "file":
       return <FileArtifactPreview artifact={artifact} />;
   }
-}
+});
 
 export type ArtifactDownload = {
   href: string;

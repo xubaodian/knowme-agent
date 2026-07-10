@@ -4,6 +4,7 @@ import type {
   LlmCompletionRequest,
   LlmCompletionResponse,
   LlmMessage,
+  LlmMessageContentPart,
   LlmModelOption,
   LlmProvider,
   LlmProviderId,
@@ -105,7 +106,7 @@ function toChatMessage(message: LlmMessage): ChatCompletionMessageParam {
   if (message.role === "tool") {
     return {
       role: "tool",
-      content: message.content ?? "",
+      content: readTextMessageContent(message.content),
       tool_call_id: message.toolCallId ?? message.name ?? "tool_call"
     };
   }
@@ -113,17 +114,36 @@ function toChatMessage(message: LlmMessage): ChatCompletionMessageParam {
   if (message.role === "assistant") {
     return {
       role: "assistant",
-      content: message.content ?? null,
+      content: readTextMessageContent(message.content) || null,
       name: message.name,
       tool_calls: message.toolCalls?.map(toOpenAiToolCall)
     };
   }
 
+  if (message.role === "user" && Array.isArray(message.content)) {
+    return {
+      role: "user",
+      content: message.content,
+      name: message.name
+    };
+  }
+
   return {
     role: message.role,
-    content: message.content ?? "",
+    content: readTextMessageContent(message.content),
     name: message.name
   };
+}
+
+function readTextMessageContent(content: LlmMessage["content"]): string {
+  if (!Array.isArray(content)) {
+    return content ?? "";
+  }
+
+  return content
+    .map((part) => (part.type === "text" ? part.text : "[image input]"))
+    .filter(Boolean)
+    .join("\n");
 }
 
 function toChatTool(tool: LlmToolDefinition): ChatCompletionTool {

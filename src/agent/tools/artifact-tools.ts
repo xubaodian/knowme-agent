@@ -123,6 +123,16 @@ async function resolveArtifactSource(
     return { content: file.content, sourcePath };
   }
 
+  if (input.kind === "image") {
+    const file = await context.sandbox.readBinaryFile({ path: sourcePath });
+    return { url: `data:${guessMimeType(sourcePath)};base64,${file.contentBase64}`, sourcePath };
+  }
+
+  if (input.kind === "file" || input.kind === "pdf") {
+    const file = await context.sandbox.readBinaryFile({ path: sourcePath });
+    return { url: `data:${input.mimeType ?? guessMimeType(sourcePath)};base64,${file.contentBase64}`, sourcePath };
+  }
+
   return { sourcePath };
 }
 
@@ -192,6 +202,40 @@ function tryParseJson(content: string): unknown | undefined {
   } catch {
     return undefined;
   }
+}
+
+function guessMimeType(filePath: string): string {
+  const lower = filePath.toLowerCase();
+
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+
+  if (lower.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+
+  if (lower.endsWith(".pdf")) {
+    return "application/pdf";
+  }
+
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+    return "text/html";
+  }
+
+  if (lower.endsWith(".json")) {
+    return "application/json";
+  }
+
+  if (lower.endsWith(".txt") || lower.endsWith(".md")) {
+    return "text/plain";
+  }
+
+  return "application/octet-stream";
 }
 
 function publishArtifactSchema() {

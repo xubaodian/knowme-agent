@@ -206,6 +206,7 @@ function deriveWorkbenchResource(
 
   if (toolName === "browser_screenshot") {
     const url = readString(dataRecord, "url");
+    const previewUrl = readString(dataRecord, "previewUrl");
 
     if (!url) {
       return undefined;
@@ -215,7 +216,7 @@ function deriveWorkbenchResource(
       kind: "browser",
       title: readString(dataRecord, "alt") ?? "浏览器截图",
       url,
-      screenshotUrl: url,
+      screenshotUrl: previewUrl,
       summary
     };
   }
