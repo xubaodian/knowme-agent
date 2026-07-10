@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="520" viewBox="0 0 1600 520" role="img" aria-labelledby="title desc">
+  <title id="title">knowme-agent 产品能力闭环</title>
+  <desc id="desc">任务输入、能力选择、可见规划、受控执行、产物预览和可追溯结果的产品闭环图。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#24616a"/></marker>
+    <style>
+      .title { font: 700 32px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #173c47; }
+      .subtitle { font: 400 16px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #5b747d; }
+      .num { font: 700 15px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #15877b; }
+      .name { font: 700 18px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #17434c; }
+      .text { font: 400 14px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #4c6871; }
+      .arrow { stroke: #24616a; stroke-width: 2; fill:none; marker-end:url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="520" fill="#fff"/>
+  <text x="70" y="58" class="title">从“提需求”到“拿结果”的产品闭环</text>
+  <text x="70" y="86" class="subtitle">knowme-agent 将模型能力转化为可选择、可观察、可审阅的任务工作流。</text>
+
+  <g>
+    <rect x="70" y="150" width="236" height="218" rx="20" fill="#e9f7f4" stroke="#8fcfc4" stroke-width="1.5"/>
+    <circle cx="108" cy="190" r="20" fill="#fff"/><text x="102" y="196" class="num">01</text>
+    <text x="98" y="238" class="name">描述任务</text>
+    <text x="98" y="269" class="text">自然语言输入目标</text>
+    <text x="98" y="293" class="text">新建会话或继续历史任务</text>
+  </g>
+  <path d="M306 259 H364" class="arrow"/>
+  <g>
+    <rect x="364" y="150" width="236" height="218" rx="20" fill="#eef7fc" stroke="#a5cde1" stroke-width="1.5"/>
+    <circle cx="402" cy="190" r="20" fill="#fff"/><text x="396" y="196" class="num">02</text>
+    <text x="392" y="238" class="name">选择能力</text>
+    <text x="392" y="269" class="text">选择模型与预置 Skill</text>
+    <text x="392" y="293" class="text">本次 Run 固定执行配置</text>
+  </g>
+  <path d="M600 259 H658" class="arrow"/>
+  <g>
+    <rect x="658" y="150" width="236" height="218" rx="20" fill="#f6f8fa" stroke="#c7d4d9" stroke-width="1.5"/>
+    <circle cx="696" cy="190" r="20" fill="#fff"/><text x="690" y="196" class="num">03</text>
+    <text x="686" y="238" class="name">看见过程</text>
+    <text x="686" y="269" class="text">计划、Todo、工具调用</text>
+    <text x="686" y="293" class="text">实时通过 Agent Flow 回传</text>
+  </g>
+  <path d="M894 259 H952" class="arrow"/>
+  <g>
+    <rect x="952" y="150" width="236" height="218" rx="20" fill="#fff8e7" stroke="#e5cc8b" stroke-width="1.5"/>
+    <circle cx="990" cy="190" r="20" fill="#fff"/><text x="984" y="196" class="num">04</text>
+    <text x="980" y="238" class="name">审阅工作台</text>
+    <text x="980" y="269" class="text">查看浏览器、文件、命令</text>
+    <text x="980" y="293" class="text">打开并预览生成产物</text>
+  </g>
+  <path d="M1188 259 H1246" class="arrow"/>
+  <g>
+    <rect x="1246" y="150" width="284" height="218" rx="20" fill="#e9f7f4" stroke="#8fcfc4" stroke-width="1.5"/>
+    <circle cx="1284" cy="190" r="20" fill="#fff"/><text x="1278" y="196" class="num">05</text>
+    <text x="1274" y="238" class="name">交付与追溯</text>
+    <text x="1274" y="269" class="text">自然语言总结 + Artifact</text>
+    <text x="1274" y="293" class="text">保留会话、Run、日志与 Trace</text>
+  </g>
+  <text x="70" y="450" class="subtitle">核心原则：结果不是黑盒输出；每一步都能被用户理解、定位和复用。</text>
+</svg>

@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1140" viewBox="0 0 1600 1140" role="img" aria-labelledby="title desc">
+  <title id="title">knowme-agent 总体架构</title>
+  <desc id="desc">从用户工作台、API 服务、Agent Runtime 到模型、Skill、Sandbox、Artifact 和可观测性的分层架构图。</desc>
+  <defs>
+    <linearGradient id="header" x1="0" x2="1">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#0f4c5c"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#3c5563"/>
+    </marker>
+    <style>
+      .title { font: 700 36px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #12313a; }
+      .subtitle { font: 400 17px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #58707a; }
+      .section { font: 700 16px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #28525d; letter-spacing: .4px; }
+      .nodeTitle { font: 700 18px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #173c47; }
+      .nodeText { font: 400 15px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #47636d; }
+      .small { font: 400 13px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #4e6972; }
+      .pill { font: 600 12px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #176b67; }
+      .arrowLabel { font: 500 13px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #526b75; }
+      .group { fill: #f8fbfb; stroke: #c9dce0; stroke-width: 1.5; }
+      .node { fill: #ffffff; stroke: #bcd5da; stroke-width: 1.5; }
+      .tealNode { fill: #e8f6f3; stroke: #8ccfc4; stroke-width: 1.5; }
+      .blueNode { fill: #edf6fb; stroke: #9ec9dc; stroke-width: 1.5; }
+      .amberNode { fill: #fff8e7; stroke: #e6cc89; stroke-width: 1.5; }
+      .grayNode { fill: #f4f7f8; stroke: #c8d3d8; stroke-width: 1.5; }
+      .arrow { fill: none; stroke: #3c5563; stroke-width: 2; marker-end: url(#arrow); }
+      .dashed { fill: none; stroke: #647c84; stroke-width: 1.8; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1140" fill="#ffffff"/>
+  <rect x="0" y="0" width="1600" height="104" fill="url(#header)"/>
+  <text x="70" y="53" class="title" fill="#ffffff">knowme-agent · 总体架构</text>
+  <text x="70" y="82" class="subtitle" fill="#d6efec">面向可观测任务执行的 Agent 工作台：用户请求、运行时、工具与产物以稳定事件契约连接。</text>
+
+  <rect x="70" y="136" width="1460" height="192" rx="18" class="group"/>
+  <text x="94" y="166" class="section">01 · 用户与产品工作台</text>
+  <rect x="96" y="187" width="222" height="108" rx="12" class="tealNode"/>
+  <text x="118" y="219" class="nodeTitle">任务工作台</text>
+  <text x="118" y="246" class="nodeText">会话 · 任务输入</text>
+  <text x="118" y="269" class="nodeText">模型 / Skill 选择</text>
+  <rect x="364" y="187" width="268" height="108" rx="12" class="tealNode"/>
+  <text x="386" y="219" class="nodeTitle">React + Vite 前端</text>
+  <text x="386" y="246" class="nodeText">Agent Flow 时间线</text>
+  <text x="386" y="269" class="nodeText">Todo、工具、状态和结果</text>
+  <rect x="678" y="187" width="270" height="108" rx="12" class="tealNode"/>
+  <text x="700" y="219" class="nodeTitle">Sandbox / 预览面板</text>
+  <text x="700" y="246" class="nodeText">浏览器 · 代码 · 文件</text>
+  <text x="700" y="269" class="nodeText">脚本执行与 Artifact 预览</text>
+  <rect x="994" y="187" width="222" height="108" rx="12" class="tealNode"/>
+  <text x="1016" y="219" class="nodeTitle">会话与调试入口</text>
+  <text x="1016" y="246" class="nodeText">历史任务</text>
+  <text x="1016" y="269" class="nodeText">Run Trace / 日志</text>
+  <rect x="1262" y="187" width="242" height="108" rx="12" class="blueNode"/>
+  <text x="1284" y="219" class="nodeTitle">交互协议</text>
+  <text x="1284" y="246" class="nodeText">REST：任务与资源</text>
+  <text x="1284" y="269" class="nodeText">SSE：实时 RunEvent</text>
+
+  <path d="M318 241 H364" class="arrow"/>
+  <path d="M632 241 H678" class="arrow"/>
+  <path d="M948 241 H994" class="arrow"/>
+  <path d="M1216 241 H1262" class="arrow"/>
+
+  <rect x="70" y="362" width="420" height="389" rx="18" class="group"/>
+  <text x="94" y="393" class="section">02 · 应用服务层（Hono）</text>
+  <rect x="96" y="416" width="366" height="84" rx="12" class="blueNode"/>
+  <text x="118" y="448" class="nodeTitle">Chat API</text>
+  <text x="118" y="474" class="nodeText">创建会话、接收用户消息、读取时间线</text>
+  <rect x="96" y="518" width="366" height="84" rx="12" class="blueNode"/>
+  <text x="118" y="550" class="nodeTitle">Run Service + SSE</text>
+  <text x="118" y="576" class="nodeText">创建 Run、持久化事件、向前端推送实时进展</text>
+  <rect x="96" y="620" width="174" height="96" rx="12" class="blueNode"/>
+  <text x="118" y="652" class="nodeTitle">Skill / LLM API</text>
+  <text x="118" y="678" class="small">暴露可用 Skill</text>
+  <text x="118" y="699" class="small">与模型目录</text>
+  <rect x="288" y="620" width="174" height="96" rx="12" class="blueNode"/>
+  <text x="310" y="652" class="nodeTitle">Debug API</text>
+  <text x="310" y="678" class="small">读取运行 Trace</text>
+  <text x="310" y="699" class="small">和节点证据</text>
+
+  <rect x="530" y="362" width="1000" height="389" rx="18" fill="#f4fbfa" stroke="#a9d7d0" stroke-width="1.5"/>
+  <text x="554" y="393" class="section">03 · Agent Runtime</text>
+  <rect x="554" y="416" width="478" height="82" rx="12" class="tealNode"/>
+  <text x="578" y="448" class="nodeTitle">AgentOrchestrator</text>
+  <text x="578" y="474" class="nodeText">装配 LLM、Skill、Sandbox、工具、上下文与事件总线</text>
+  <rect x="1052" y="416" width="450" height="82" rx="12" class="tealNode"/>
+  <text x="1076" y="448" class="nodeTitle">AgentEventBus</text>
+  <text x="1076" y="474" class="nodeText">将执行状态标准化为 RunEvent</text>
+
+  <rect x="554" y="528" width="286" height="150" rx="12" class="node"/>
+  <text x="578" y="560" class="nodeTitle">Planning</text>
+  <text x="578" y="586" class="nodeText">模型调用 plan_todos</text>
+  <text x="578" y="609" class="nodeText">生成目标与 Todo 计划</text>
+  <text x="578" y="640" class="pill">PLAN</text>
+  <rect x="870" y="528" width="286" height="150" rx="12" class="node"/>
+  <text x="894" y="560" class="nodeTitle">Execution Units</text>
+  <text x="894" y="586" class="nodeText">每个 Todo 独立执行</text>
+  <text x="894" y="609" class="nodeText">构建 ContextPack 与完成摘要</text>
+  <text x="894" y="640" class="pill">EXECUTE</text>
+  <rect x="1186" y="528" width="286" height="150" rx="12" class="node"/>
+  <text x="1210" y="560" class="nodeTitle">Finalization</text>
+  <text x="1210" y="586" class="nodeText">汇总 TodoCompletion</text>
+  <text x="1210" y="609" class="nodeText">调用 finish_task 生成答复</text>
+  <text x="1210" y="640" class="pill">FINALIZE</text>
+  <path d="M840 603 H870" class="arrow"/>
+  <path d="M1156 603 H1186" class="arrow"/>
+  <path d="M793 498 V528" class="arrow"/>
+  <path d="M1277 498 V528" class="arrow"/>
+
+  <rect x="70" y="785" width="1460" height="246" rx="18" class="group"/>
+  <text x="94" y="816" class="section">04 · 可替换能力层、隔离与可观测性</text>
+  <rect x="96" y="840" width="254" height="150" rx="12" class="amberNode"/>
+  <text x="120" y="872" class="nodeTitle">LLM Provider</text>
+  <text x="120" y="898" class="nodeText">OpenAI-compatible 接口</text>
+  <text x="120" y="921" class="nodeText">当前默认 OpenRouter</text>
+  <text x="120" y="952" class="small">按 Run 固定模型选择</text>
+  <rect x="378" y="840" width="254" height="150" rx="12" class="amberNode"/>
+  <text x="402" y="872" class="nodeTitle">Skill Registry</text>
+  <text x="402" y="898" class="nodeText">读取选定 SKILL.md</text>
+  <text x="402" y="921" class="nodeText">按需访问引用资源</text>
+  <text x="402" y="952" class="small">每次 Run 复制 Skill 快照</text>
+  <rect x="660" y="840" width="254" height="150" rx="12" class="amberNode"/>
+  <text x="684" y="872" class="nodeTitle">Tool Registry</text>
+  <text x="684" y="898" class="nodeText">Todo · Note · Artifact</text>
+  <text x="684" y="921" class="nodeText">Sandbox 工具统一注册</text>
+  <text x="684" y="952" class="small">模型只能经工具产生副作用</text>
+  <rect x="942" y="840" width="254" height="150" rx="12" class="amberNode"/>
+  <text x="966" y="872" class="nodeTitle">Local Sandbox</text>
+  <text x="966" y="898" class="nodeText">文件、命令、代码执行</text>
+  <text x="966" y="921" class="nodeText">浏览器、截图与预览</text>
+  <text x="966" y="952" class="small">可替换为云端 Adapter</text>
+  <rect x="1224" y="840" width="278" height="150" rx="12" class="grayNode"/>
+  <text x="1248" y="872" class="nodeTitle">持久化与 Trace</text>
+  <text x="1248" y="898" class="nodeText">.knowme/app-state.json</text>
+  <text x="1248" y="921" class="nodeText">Run workspace、日志、节点证据</text>
+  <text x="1248" y="952" class="small">重启时未完成 Run 标记为失败</text>
+
+  <path d="M1262 295 V518 H462" class="dashed"/>
+  <text x="1068" y="392" class="arrowLabel">REST：创建任务 / 读取资源</text>
+  <path d="M462 560 H1262 V295" class="dashed"/>
+  <text x="1056" y="544" class="arrowLabel">SSE：RunEvent / Artifact / 状态</text>
+  <path d="M490 560 H530" class="arrow"/>
+  <path d="M793 678 V840" class="arrow"/>
+  <path d="M985 678 V840" class="arrow"/>
+  <path d="M1277 678 V840" class="arrow"/>
+  <path d="M350 915 H378" class="arrow"/>
+  <path d="M632 915 H660" class="arrow"/>
+  <path d="M914 915 H942" class="arrow"/>
+  <path d="M1196 915 H1224" class="arrow"/>
+  <text x="70" y="1090" class="small">边界说明：前端消费稳定的事件与 Artifact 契约；Runtime 通过可替换 Provider / Adapter 执行，避免 UI 与具体模型、Sandbox 强耦合。</text>
+</svg>

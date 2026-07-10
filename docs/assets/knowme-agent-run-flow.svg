@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="920" viewBox="0 0 1600 920" role="img" aria-labelledby="title desc">
+  <title id="title">knowme-agent 单次任务运行流</title>
+  <desc id="desc">从用户提交任务到系统通过 SSE 展示规划、执行、产物和最终答复的时序流程图。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#3e5961"/></marker>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #153b45; }
+      .subtitle { font: 400 17px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #5b747d; }
+      .head { font: 700 17px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #fff; }
+      .label { font: 500 14px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #34545e; }
+      .note { font: 400 13px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #56717a; }
+      .phase { font: 700 13px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #15746d; letter-spacing: .8px; }
+      .lifeline { stroke: #bdd0d4; stroke-width: 1.5; stroke-dasharray: 5 6; }
+      .message { stroke: #3e5961; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .event { stroke: #148f83; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .box { fill: #fff; stroke: #b8d2d6; stroke-width: 1.3; }
+    </style>
+  </defs>
+  <rect width="1600" height="920" fill="#fff"/>
+  <text x="70" y="54" class="title">knowme-agent · 单次任务运行流</text>
+  <text x="70" y="82" class="subtitle">一次 Run 从请求创建、环境快照到规划、分步执行、产物发布与最终答复的闭环。</text>
+
+  <rect x="70" y="118" width="220" height="54" rx="12" fill="#0f766e"/><text x="128" y="152" class="head">用户工作台</text>
+  <rect x="362" y="118" width="220" height="54" rx="12" fill="#0f766e"/><text x="430" y="152" class="head">Chat API</text>
+  <rect x="654" y="118" width="220" height="54" rx="12" fill="#0f766e"/><text x="711" y="152" class="head">Run Service</text>
+  <rect x="946" y="118" width="220" height="54" rx="12" fill="#0f766e"/><text x="995" y="152" class="head">Agent Runtime</text>
+  <rect x="1238" y="118" width="220" height="54" rx="12" fill="#0f766e"/><text x="1268" y="152" class="head">模型、工具与产物</text>
+
+  <line x1="180" y1="172" x2="180" y2="852" class="lifeline"/>
+  <line x1="472" y1="172" x2="472" y2="852" class="lifeline"/>
+  <line x1="764" y1="172" x2="764" y2="852" class="lifeline"/>
+  <line x1="1056" y1="172" x2="1056" y2="852" class="lifeline"/>
+  <line x1="1348" y1="172" x2="1348" y2="852" class="lifeline"/>
+
+  <rect x="70" y="205" width="1388" height="172" rx="14" fill="#f3fbfa" stroke="#c5e3df"/>
+  <text x="96" y="235" class="phase">01 · 创建并准备 RUN</text>
+  <path d="M180 264 H472" class="message"/><text x="225" y="253" class="label">POST /api/chats/:id/messages</text>
+  <path d="M472 300 H764" class="message"/><text x="532" y="289" class="label">创建 user message 与 queued run</text>
+  <path d="M764 336 H1056" class="message"/><text x="828" y="325" class="label">创建隔离 workspace，复制选定 Skill</text>
+  <path d="M1056 360 H1348" class="message"/><text x="1111" y="349" class="label">加载指定模型与工具注册表</text>
+
+  <rect x="70" y="406" width="1388" height="234" rx="14" fill="#f7fbfe" stroke="#c6dce7"/>
+  <text x="96" y="436" class="phase">02 · 规划与分步执行</text>
+  <path d="M1056 470 H1348" class="message"/><text x="1120" y="459" class="label">Planning：强制调用 plan_todos</text>
+  <path d="M1348 504 H1056" class="message"/><text x="1114" y="493" class="label">返回执行计划</text>
+  <path d="M1056 538 H1348" class="message"/><text x="1100" y="527" class="label">Execution Unit：调用 LLM / Tool</text>
+  <path d="M1348 572 H1056" class="message"/><text x="1100" y="561" class="label">工具结果、文件、浏览器状态、Artifact</text>
+  <rect x="919" y="590" width="274" height="32" rx="8" class="box"/>
+  <text x="939" y="612" class="note">每个 Todo 仅携带 ContextPack 与前序摘要</text>
+
+  <rect x="70" y="670" width="1388" height="186" rx="14" fill="#fdfbf5" stroke="#e7d7a8"/>
+  <text x="96" y="700" class="phase">03 · 发布结果并回流工作台</text>
+  <path d="M1056 734 H1348" class="message"/><text x="1118" y="723" class="label">Finalization：finish_task</text>
+  <path d="M1056 770 H764" class="event"/><text x="821" y="759" class="label">持久化 RunEvent / Artifact / Trace</text>
+  <path d="M764 806 H180" class="event"/><text x="372" y="795" class="label">SSE 回放规划、Todo、工具、预览与最终答复</text>
+  <text x="70" y="891" class="note">失败处理：Run 失败会产生 run.failed 事件；服务重启后，未完成的 queued / running Run 会被标记为中断，避免出现“悬空执行”。</text>
+</svg>
