@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -132,6 +132,16 @@ test("chat timeline API returns persisted messages, runs, events, and artifacts"
     assert.equal(payload.eventsByRun[runId].length, 2);
     assert.equal(payload.artifactsByRun[runId].length, 1);
     assert.equal(payload.artifactsByRun[runId][0].title, "Timeline Report");
+
+    const migratedIndex = JSON.parse(await readFile(statePath, "utf8"));
+    const chatDetail = JSON.parse(await readFile(path.join(tempRoot, "state-details", "chats", `${chatId}.json`), "utf8"));
+    const runDetail = JSON.parse(await readFile(path.join(tempRoot, "state-details", "runs", `${runId}.json`), "utf8"));
+
+    assert.equal(migratedIndex.version, 2);
+    assert.equal("messagesByChat" in migratedIndex, false);
+    assert.equal(chatDetail.messages.length, 2);
+    assert.equal(runDetail.events.length, 2);
+    assert.equal(runDetail.artifacts.length, 1);
   } finally {
     delete process.env.KNOWME_STATE_FILE;
     await rm(tempRoot, { recursive: true, force: true });
