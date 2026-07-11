@@ -31,4 +31,5 @@ Each todo must include:
 - When a todo expects a file output, name it as a relative workspace path such as `outputs/report.html`.
 - Do not create vague todos such as "think", "prepare", or "handle task" unless the expected output is a concrete summary, file, artifact, or validation result.
 - Do not read files, write files, run commands, open browsers, create artifacts, or complete task output in this phase.
+- Call `plan_todos` exactly once. After the plan is created successfully, stop planning immediately; do not update todo status or perform any todo work in this phase.
 - If a skill is provided, use it as domain guidance. If no skill is provided, create a generic but concrete plan.
