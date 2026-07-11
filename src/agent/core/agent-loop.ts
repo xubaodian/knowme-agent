@@ -10,6 +10,7 @@ import type { AgentEventBus } from "./event-bus.js";
 export type AgentLoopToolResult = {
   toolName: string;
   toolCallId: string;
+  arguments?: string;
   ok: boolean;
   summary?: string;
   data?: unknown;
@@ -63,8 +64,12 @@ type ToolCallExecutionResult =
       error: string;
     };
 
+const contextCompressionThresholdTokens = 80_000;
+const contextCompressionTargetTokens = 30_000;
+
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
   const maxIterations = options.maxIterations ?? 24;
+  const initialMessages = [...options.llmMessages];
   const messages = [...options.llmMessages];
   const tools = selectTools(options.toolRegistry.list(), options.allowedTools);
   const toolDefinitions = toLlmToolDefinitions(tools);
@@ -75,6 +80,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   const toolResults: AgentLoopToolResult[] = [];
   let recoveryPromptCount = 0;
   const maxRecoveryPrompts = 3;
+  let lastPromptTokens: number | undefined;
+  let lastPromptMessageCount = 0;
 
   runLogger.event("agent.loop.start", {
     phase: options.name,
@@ -103,6 +110,27 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
   try {
     for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      const promptTokens = lastPromptTokens === undefined
+        ? estimatePromptTokens(messages, toolDefinitions)
+        : lastPromptTokens + estimateMessageTokens(messages.slice(lastPromptMessageCount));
+
+      if (promptTokens > contextCompressionThresholdTokens) {
+        const beforeMessageCount = messages.length;
+        const compactedMessages = compactExecutionContext(initialMessages, messages, toolResults, iteration, toolDefinitions);
+        messages.splice(0, messages.length, ...compactedMessages);
+        lastPromptTokens = undefined;
+        lastPromptMessageCount = 0;
+        runLogger.event("agent.loop.context_compacted", {
+          phase: options.name,
+          iteration,
+          promptTokensBefore: promptTokens,
+          promptTokensAfter: estimatePromptTokens(messages, toolDefinitions),
+          messageCountBefore: beforeMessageCount,
+          messageCountAfter: messages.length,
+          retainedPathCount: collectTraceablePaths(toolResults).length
+        });
+      }
+
       runLogger.event("agent.loop.iteration.start", {
         phase: options.name,
         iteration,
@@ -142,6 +170,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
           temperature: 0.2
         }
       });
+      lastPromptTokens = response.usage?.promptTokens ?? estimatePromptTokens(messages, toolDefinitions);
+      lastPromptMessageCount = messages.length;
       const toolCalls = response.toolCalls ?? [];
 
       runLogger.event("agent.loop.iteration.response", {
@@ -320,6 +350,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         toolResults.push({
           toolName: toolCall.name,
           toolCallId: toolCall.id,
+          arguments: toolCall.arguments,
           ok: toolResult.ok,
           summary: toolResult.ok ? toolResult.summary : undefined,
           data: toolResult.ok ? toolResult.data : undefined,
@@ -436,6 +467,154 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     });
     throw error;
   }
+}
+
+function compactExecutionContext(
+  initialMessages: LlmMessage[],
+  messages: LlmMessage[],
+  toolResults: AgentLoopToolResult[],
+  iteration: number,
+  toolDefinitions: LlmToolDefinition[]
+): LlmMessage[] {
+  const latestPlan = [...toolResults].reverse().find((result) => result.toolName === "plan_todos" && result.ok)?.data;
+  const latestFailure = [...toolResults].reverse().find((result) => !result.ok);
+  const latestAssistantNote = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && typeof message.content === "string" && message.content.trim());
+  const paths = collectTraceablePaths(toolResults);
+  const baseCheckpoint = {
+    kind: "execution_context_checkpoint",
+    instruction: "Continue the current todo from this checkpoint. Re-read referenced paths when full content is needed.",
+    currentExecutionState: {
+      iteration,
+      successfulToolCalls: toolResults.filter((result) => result.ok).length,
+      failedToolCalls: toolResults.filter((result) => !result.ok).length,
+      latestFailure: latestFailure ? { toolName: latestFailure.toolName, error: latestFailure.error } : undefined,
+      latestAssistantNote: typeof latestAssistantNote?.content === "string" ? truncate(latestAssistantNote.content, 2_000) : undefined
+    },
+    plan: latestPlan ?? "Use the original plan and current todo retained above.",
+    traceablePaths: paths,
+    toolHistory: [] as Array<Record<string, unknown>>
+  };
+  const retainedHistory: Array<Record<string, unknown>> = [];
+
+  for (const result of [...toolResults].reverse()) {
+    const entry = compactToolResult(result);
+    const candidateHistory = [entry, ...retainedHistory];
+    const candidateCheckpoint = { ...baseCheckpoint, toolHistory: candidateHistory };
+    const candidateMessages = [...initialMessages, toCheckpointMessage(candidateCheckpoint)];
+
+    if (estimatePromptTokens(candidateMessages, toolDefinitions) > contextCompressionTargetTokens) {
+      continue;
+    }
+
+    retainedHistory.unshift(entry);
+  }
+
+  return [...initialMessages, toCheckpointMessage({ ...baseCheckpoint, toolHistory: retainedHistory })];
+}
+
+function toCheckpointMessage(checkpoint: Record<string, unknown>): LlmMessage {
+  return {
+    role: "user",
+    content: `Runtime-generated execution checkpoint after context compression:\n${JSON.stringify(checkpoint, null, 2)}`
+  };
+}
+
+function compactToolResult(result: AgentLoopToolResult): Record<string, unknown> {
+  return {
+    toolName: result.toolName,
+    ok: result.ok,
+    command: readToolCommand(result.arguments),
+    summary: result.summary ? truncate(result.summary, 500) : undefined,
+    error: result.error ? truncate(result.error, 1_000) : undefined,
+    paths: collectTraceablePaths([result])
+  };
+}
+
+function readToolCommand(rawArguments: string | undefined): string | undefined {
+  if (!rawArguments) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(rawArguments) as Record<string, unknown>;
+    const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.code === "string" ? parsed.code : undefined;
+    return command ? truncate(command, 1_000) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function collectTraceablePaths(toolResults: AgentLoopToolResult[]): string[] {
+  const paths = new Set<string>();
+
+  for (const result of toolResults) {
+    collectPathsFromValue(result.arguments, paths);
+    collectPathsFromValue(result.data, paths);
+    collectPathsFromValue(result.summary, paths);
+    collectPathsFromValue(result.error, paths);
+  }
+
+  return [...paths];
+}
+
+function collectPathsFromValue(value: unknown, paths: Set<string>, key?: string): void {
+  if (typeof value === "string") {
+    if (value.startsWith("data:")) {
+      return;
+    }
+
+    if (key && /(?:path|paths|file|files|ref|refs|url)$/i.test(key) && value.length <= 2_000) {
+      paths.add(value);
+    }
+
+    if (!value.includes("/")) {
+      return;
+    }
+
+    for (const match of value.match(/(?:https?:\/\/[^\s"'<>]+|(?:\.{0,2}\/|\/)?(?:[\w@.-]+\/)+[\w@.-]+(?:\.[\w-]+)?)/g) ?? []) {
+      if (!match.startsWith("data:")) {
+        paths.add(match.replace(/[),.;:]+$/, ""));
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPathsFromValue(item, paths, key));
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    for (const [childKey, childValue] of Object.entries(value)) {
+      collectPathsFromValue(childValue, paths, childKey);
+    }
+  }
+}
+
+function estimatePromptTokens(messages: LlmMessage[], toolDefinitions: LlmToolDefinition[]): number {
+  return estimateSerializedTokens({ messages, tools: toolDefinitions });
+}
+
+function estimateMessageTokens(messages: LlmMessage[]): number {
+  return estimateSerializedTokens(messages);
+}
+
+function estimateSerializedTokens(value: unknown): number {
+  const serialized = JSON.stringify(value);
+  let asciiChars = 0;
+  let nonAsciiChars = 0;
+
+  for (const char of serialized) {
+    if (char.charCodeAt(0) <= 0x7f) {
+      asciiChars += 1;
+    } else {
+      nonAsciiChars += 1;
+    }
+  }
+
+  return Math.ceil(asciiChars / 4 + nonAsciiChars);
 }
 
 function resolveToolChoice(

@@ -36,19 +36,24 @@ export class FinalizationRunner {
       input: {
         goal: this.input.goal,
         todos: this.input.todos,
-        artifactCount: this.input.artifactManager.getPublishedArtifacts().length
+        artifactCount:
+          this.input.artifactManager.getPublishedArtifacts().length,
       },
       metadata: {
-        phase: "finalization"
-      }
+        phase: "finalization",
+      },
     });
-    this.input.eventBus.setActiveNode({ id: traceNodeId ?? "finalization", parentId: this.input.parentTraceId });
+    this.input.eventBus.setActiveNode({
+      id: traceNodeId ?? "finalization",
+      parentId: this.input.parentTraceId,
+    });
 
     try {
       this.input.eventBus.runLogger.event("runtime.finalization.start", {
         goal: this.input.goal,
         todoCount: this.input.todos.length,
-        artifactCount: this.input.artifactManager.getPublishedArtifacts().length
+        artifactCount:
+          this.input.artifactManager.getPublishedArtifacts().length,
       });
       const result = await runAgentLoop({
         name: "Finalization",
@@ -60,7 +65,7 @@ export class FinalizationRunner {
         parentTraceId: traceNodeId,
         allowedTools: ["finish_task"],
         toolChoice: "required",
-        maxIterations: 6,
+        maxIterations: 15,
         llmMessages: [
           {
             role: "system",
@@ -69,14 +74,14 @@ export class FinalizationRunner {
               goal: this.input.goal,
               todos: this.input.todos,
               artifacts: this.input.artifactManager.getPublishedArtifacts(),
-              carryForwardSummary: this.input.contextManager.getSharedSummary()
-            })
+              carryForwardSummary: this.input.contextManager.getSharedSummary(),
+            }),
           },
           {
             role: "user",
-            content: "Finalize this task now by calling finish_task."
-          }
-        ]
+            content: "Finalize this task now by calling finish_task.",
+          },
+        ],
       });
       let finished = this.input.taskState.getFinishedTask();
 
@@ -88,19 +93,20 @@ export class FinalizationRunner {
         status: finished.status,
         answerChars: finished.answer.length,
         artifactRefs: finished.artifactRefs,
-        fileRefs: finished.fileRefs
+        fileRefs: finished.fileRefs,
       });
       await this.input.trace?.endNode(traceNodeId, {
         status: finished.status === "completed" ? "success" : "error",
         summary: finished.summary,
-        output: finished
+        output: finished,
       });
       return finished;
     } catch (error) {
       await this.input.trace?.endNode(traceNodeId, {
         status: "error",
-        summary: error instanceof Error ? error.message : "Finalization failed.",
-        error
+        summary:
+          error instanceof Error ? error.message : "Finalization failed.",
+        error,
       });
       throw error;
     } finally {
@@ -108,13 +114,26 @@ export class FinalizationRunner {
     }
   }
 
-  private async finishFallback(content: string, parentTraceId?: string): Promise<FinishedTask> {
-    const completedTodos = this.input.todos.filter((todo) => todo.status === "completed");
-    const failedTodos = this.input.todos.filter((todo) => todo.status === "failed");
+  private async finishFallback(
+    content: string,
+    parentTraceId?: string,
+  ): Promise<FinishedTask> {
+    const completedTodos = this.input.todos.filter(
+      (todo) => todo.status === "completed",
+    );
+    const failedTodos = this.input.todos.filter(
+      (todo) => todo.status === "failed",
+    );
     const status = failedTodos.length > 0 ? "failed" : "completed";
-    const answer = content.trim() || (status === "completed" ? "任务已完成。" : "任务未完全完成。");
-    const artifactRefs = [...new Set(this.input.todos.flatMap((todo) => todo.artifactRefs ?? []))];
-    const fileRefs = [...new Set(this.input.todos.flatMap((todo) => todo.fileRefs ?? []))];
+    const answer =
+      content.trim() ||
+      (status === "completed" ? "任务已完成。" : "任务未完全完成。");
+    const artifactRefs = [
+      ...new Set(this.input.todos.flatMap((todo) => todo.artifactRefs ?? [])),
+    ];
+    const fileRefs = [
+      ...new Set(this.input.todos.flatMap((todo) => todo.fileRefs ?? [])),
+    ];
     const output = await this.input.toolRunner.run(
       "finish_task",
       {
@@ -122,9 +141,15 @@ export class FinalizationRunner {
         answer,
         artifactRefs,
         fileRefs,
-        summary: `${completedTodos.length}/${this.input.todos.length} todos completed.`
+        summary: `${completedTodos.length}/${this.input.todos.length} todos completed.`,
       },
-      { traceParentId: parentTraceId, traceMetadata: { phase: "finalization", reason: "runtime_finish_fallback" } }
+      {
+        traceParentId: parentTraceId,
+        traceMetadata: {
+          phase: "finalization",
+          reason: "runtime_finish_fallback",
+        },
+      },
     );
 
     return (output.data as { finishedTask: FinishedTask }).finishedTask;
