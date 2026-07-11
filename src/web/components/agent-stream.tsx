@@ -1,4 +1,4 @@
-import { Bot, Check, CheckCircle2, Image as ImageIcon, LoaderCircle, Paperclip, Send, XCircle } from "lucide-react";
+import { AlertTriangle, Bot, Check, CheckCircle2, Circle, Image as ImageIcon, LoaderCircle, Paperclip, Send, XCircle } from "lucide-react";
 import type { FormEvent, ReactNode, UIEvent } from "react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { buildRunFlowViewModel } from "../../shared/run-flow-view-model";
@@ -109,11 +109,22 @@ export function AgentStream({
     }
 
     const frame = window.requestAnimationFrame(() => {
+      if (activeRun?.status === "failed") {
+        const failure = flow.querySelector<HTMLElement>(`[data-run-failure="${activeRun.id}"]`);
+
+        if (failure) {
+          const flowBounds = flow.getBoundingClientRect();
+          const failureBounds = failure.getBoundingClientRect();
+          flow.scrollTo({ top: Math.max(flow.scrollTop + failureBounds.top - flowBounds.top - 12, 0) });
+          return;
+        }
+      }
+
       flow.scrollTo({ top: flow.scrollHeight });
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [flowVersion]);
+  }, [activeRun?.id, activeRun?.status, flowVersion]);
 
   function handleFlowScroll(event: UIEvent<HTMLDivElement>) {
     const flow = event.currentTarget;
@@ -281,6 +292,7 @@ function AgentRunCard({
     flow.runArtifacts.length > 0 ||
     flow.finalMessages.length > 0;
   const isRunning = run.status === "queued" || run.status === "running";
+  const failureEvent = [...events].reverse().find((event) => event.type === "run.failed");
 
   return (
     <article className="rounded-3xl bg-card/55 p-5 shadow-[var(--shadow-soft)]">
@@ -297,6 +309,10 @@ function AgentRunCard({
         </div>
       </div>
 
+      {run.status === "failed" ? (
+        <RunFailureBanner detail={failureEvent?.detail ?? "任务执行失败，请查看失败步骤和运行日志。"} runId={run.id} />
+      ) : null}
+
       <div className="relative ml-4 mt-5 border-l border-primary/15 pl-7">
         {isRunning ? <RunActivity events={events} flow={flow} /> : null}
 
@@ -308,6 +324,7 @@ function AgentRunCard({
               index={index}
               key={todo.id}
               onOpenArtifact={onOpenArtifact}
+              runStatus={run.status}
               selectedArtifactId={selectedArtifactId}
               todo={todo}
             />
@@ -327,6 +344,24 @@ function AgentRunCard({
         ))}
       </div>
     </article>
+  );
+}
+
+function RunFailureBanner({ detail, runId }: { detail: string; runId: string }) {
+  return (
+    <div
+      className="sticky top-3 z-20 mt-4 flex items-start gap-3 rounded-2xl bg-destructive/8 px-4 py-3.5 shadow-[var(--shadow-soft)] backdrop-blur-xl"
+      data-run-failure={runId}
+      role="alert"
+    >
+      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-destructive/12 text-destructive">
+        <AlertTriangle className="size-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-foreground">任务执行失败</p>
+        <p className="mt-1 break-words [overflow-wrap:anywhere] text-xs leading-5 text-muted-foreground">{detail}</p>
+      </div>
+    </div>
   );
 }
 
@@ -394,25 +429,35 @@ function PlanningBlock({ planning }: { planning: RunFlowPlanning }) {
 function TodoBlock({
   index,
   onOpenArtifact,
+  runStatus,
   selectedArtifactId,
   todo
 }: {
   index: number;
   onOpenArtifact: (artifactId: string) => void;
+  runStatus: Run["status"];
   selectedArtifactId?: string;
   todo: RunFlowTodo;
 }) {
+  const status = runStatus === "failed" && (todo.status === "pending" || todo.status === "in_progress") ? "failed" : todo.status;
+  const statusLabel =
+    runStatus === "failed" && todo.status === "pending"
+      ? "未执行"
+      : runStatus === "failed" && todo.status === "in_progress"
+        ? "已中断"
+        : status;
+
   return (
-    <details className="flow-step group rounded-2xl bg-muted/28 px-4 py-3.5 transition-colors hover:bg-muted/40" open={todo.status === "in_progress"}>
+    <details className="flow-step group rounded-2xl bg-muted/28 px-4 py-3.5 transition-colors hover:bg-muted/40" open={status === "in_progress"}>
       <summary className="flex cursor-pointer list-none items-start gap-3">
-        <StatusDot status={todo.status} />
+        <StatusDot status={status} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">步骤 {index + 1}</p>
             <span className="text-sm text-muted-foreground">·</span>
             <p className="min-w-0 text-sm font-medium text-foreground">{todo.title}</p>
-            <Badge variant={todo.status === "completed" ? "success" : todo.status === "failed" ? "warning" : "outline"}>
-              {todo.status}
+            <Badge variant={status === "completed" ? "success" : status === "failed" ? "warning" : "outline"}>
+              {statusLabel}
             </Badge>
           </div>
           {todo.summary ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{todo.summary}</p> : null}
@@ -561,6 +606,8 @@ function StatusDot({ status }: { status: "running" | RunFlowTodo["status"] }) {
         <Check className="size-4" />
       ) : status === "failed" ? (
         <XCircle className="size-4" />
+      ) : status === "pending" ? (
+        <Circle className="size-2.5 fill-current" />
       ) : (
         <LoaderCircle className="size-4 animate-spin" />
       )}

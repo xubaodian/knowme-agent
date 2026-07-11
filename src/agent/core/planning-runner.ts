@@ -66,6 +66,7 @@ export class PlanningRunner {
         allowedTools: ["plan_todos"],
         toolChoice: "required",
         maxIterations: 6,
+        stopAfterSuccessfulToolCall: true,
         llmMessages: [
           { role: "system", content: await buildPlanningPrompt({ profile: this.input.profile }) },
           { role: "user", content: this.input.prompt }
@@ -150,4 +151,3 @@ function summarizeProfile(profile: ExecutionProfile) {
       }
     : profile;
 }
-

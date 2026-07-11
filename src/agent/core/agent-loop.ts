@@ -36,6 +36,7 @@ export type AgentLoopOptions = {
   maxIterations?: number;
   requireFinalContent?: boolean;
   allowSyntheticFinalContent?: boolean;
+  stopAfterSuccessfulToolCall?: boolean;
 };
 
 export type AgentLoopResult = {
@@ -378,6 +379,35 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
               ]
             });
           }
+        }
+
+        if (toolResult.ok && options.stopAfterSuccessfulToolCall) {
+          const content = response.content.trim();
+          const summary = toolResult.summary ?? `${toolCall.name} completed.`;
+          runLogger.event("agent.loop.end", {
+            phase: options.name,
+            iteration,
+            reason: "successful_tool_call",
+            toolName: toolCall.name,
+            summary
+          });
+          await options.trace?.endNode(loopTraceNodeId, {
+            status: "success",
+            summary,
+            output: {
+              reason: "successful_tool_call",
+              content,
+              messages,
+              failedToolCallCount,
+              toolResults
+            }
+          });
+          return {
+            content,
+            messages,
+            failedToolCallCount,
+            toolResults
+          };
         }
       }
     }
