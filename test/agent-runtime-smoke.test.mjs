@@ -6,7 +6,10 @@ import test from "node:test";
 import { AgentOrchestrator } from "../dist/agent/core/orchestrator.js";
 import { SkillRegistry } from "../dist/agent/skills/skill-registry.js";
 import { LocalSandboxAdapter } from "../dist/agent/tools/sandbox/local-sandbox-adapter.js";
-import { createLocalRunWorkspace, snapshotSkillToWorkspace } from "../dist/server/services/local-run-workspace.js";
+import {
+  createLocalRunWorkspace,
+  snapshotSkillToWorkspace,
+} from "../dist/server/services/local-run-workspace.js";
 
 test("three-phase runtime uses narrow tools and relative run workspace paths", async () => {
   const timestamp = new Date().toISOString();
@@ -18,12 +21,14 @@ test("three-phase runtime uses narrow tools and relative run workspace paths", a
     skillName: "html-report",
     status: "queued",
     createdAt: timestamp,
-    updatedAt: timestamp
+    updatedAt: timestamp,
   };
   const workspace = await createLocalRunWorkspace(run);
 
   try {
-    const skill = await new SkillRegistry(path.join(process.cwd(), "agent", "skills")).loadSkill("html-report");
+    const skill = await new SkillRegistry(
+      path.join(process.cwd(), "agent", "skills"),
+    ).loadSkill("html-report");
     const snapshot = await snapshotSkillToWorkspace(skill, workspace);
 
     assert.ok(snapshot);
@@ -35,15 +40,27 @@ test("three-phase runtime uses narrow tools and relative run workspace paths", a
 
     const sandbox = new LocalSandboxAdapter(workspace.filesRoot);
     await assert.rejects(
-      () => sandbox.writeFile({ path: path.join(workspace.filesRoot, "outputs/absolute.txt"), content: "bad" }),
-      /must be relative/
+      () =>
+        sandbox.writeFile({
+          path: path.join(workspace.filesRoot, "outputs/absolute.txt"),
+          content: "bad",
+        }),
+      /must be relative/,
     );
     await assert.rejects(
-      () => sandbox.browserNavigate({ url: `file://${path.join(workspace.filesRoot, "outputs/result.txt")}` }),
-      /browser_open_file/
+      () =>
+        sandbox.browserNavigate({
+          url: `file://${path.join(workspace.filesRoot, "outputs/result.txt")}`,
+        }),
+      /browser_open_file/,
     );
 
-    const provider = new FakeProvider([process.cwd(), workspace.root, workspace.filesRoot, workspace.skillRoot]);
+    const provider = new FakeProvider([
+      process.cwd(),
+      workspace.root,
+      workspace.filesRoot,
+      workspace.skillRoot,
+    ]);
     const events = [];
     const artifacts = [];
     const result = await new AgentOrchestrator().run({
@@ -54,24 +71,51 @@ test("three-phase runtime uses narrow tools and relative run workspace paths", a
       loadedSkill: snapshot,
       llmProvider: provider,
       onEvent: (event) => events.push(event),
-      onArtifact: (artifact) => artifacts.push(artifact)
+      onArtifact: (artifact) => artifacts.push(artifact),
     });
 
     assert.match(result.reply, /Smoke task completed/);
-    assert.equal(await readFile(path.join(workspace.filesRoot, "outputs/result.txt"), "utf8"), "recorded context -> file output\n");
+    assert.equal(
+      await readFile(
+        path.join(workspace.filesRoot, "outputs/result.txt"),
+        "utf8",
+      ),
+      "recorded context -> file output\n",
+    );
     assert.equal(artifacts.length, 1);
     assert.equal(artifacts[0].title, "Runtime Smoke Artifact");
     assert.equal(artifacts[0].metadata?.sourcePath, "outputs/result.txt");
     assert.equal(artifacts[0].content, "recorded context -> file output\n");
-    assert.ok(events.some((event) => event.type === "tool.started" && event.title === "record_note"));
-    assert.ok(events.some((event) => event.type === "tool.started" && event.title === "publish_artifact"));
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "tool.started" && event.title === "share_context",
+      ),
+    );
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "tool.started" && event.title === "publish_artifact",
+      ),
+    );
     assert.ok(events.some((event) => event.type === "artifact.created"));
-    const nodeStarted = events.find((event) => event.type === "tool.started" && event.title === "run_node");
-    const nodeFinished = events.find((event) => event.type === "tool.finished" && event.title === "run_node completed");
+    const nodeStarted = events.find(
+      (event) => event.type === "tool.started" && event.title === "run_node",
+    );
+    const nodeFinished = events.find(
+      (event) =>
+        event.type === "tool.finished" && event.title === "run_node completed",
+    );
     assert.equal(nodeStarted?.payload?.tool?.resource?.kind, "command");
-    assert.equal(nodeStarted?.payload?.tool?.resource?.command, "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());");
+    assert.equal(
+      nodeStarted?.payload?.tool?.resource?.command,
+      "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());",
+    );
     assert.equal(nodeFinished?.payload?.tool?.resource?.kind, "command");
-    assert.equal(nodeFinished?.payload?.tool?.resource?.command, "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());");
+    assert.equal(
+      nodeFinished?.payload?.tool?.resource?.command,
+      "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());",
+    );
   } finally {
     await rm(workspace.root, { recursive: true, force: true });
   }
@@ -94,7 +138,7 @@ class FakeProvider {
       provider: this.id,
       model: this.model,
       configured: true,
-      availableModels: []
+      availableModels: [],
     };
   }
 
@@ -114,18 +158,29 @@ class FakeProvider {
             {
               id: "capture-context",
               title: "Capture reusable context",
-              description: "Record an internal note that the next execution unit can reuse.",
-              expectedOutput: "A record note containing the smoke context.",
-              doneCriteria: ["record_note is called", "The todo is completed with a concise summary"]
+              description:
+                "Share the one stable fact that the next execution unit must reuse.",
+              expectedOutput:
+                "One shared-context message containing the smoke context.",
+              doneCriteria: [
+                "share_context is called once",
+                "The todo is completed with a concise summary",
+              ],
             },
             {
               id: "produce-file",
               title: "Produce file and artifact",
-              description: "Read the record note, write a relative workspace file, run a code validation, and publish the artifact.",
-              expectedOutput: "outputs/result.txt and a Runtime Smoke Artifact.",
-              doneCriteria: ["The file exists", "The artifact is published", "The todo summary includes refs"]
-            }
-          ]
+              description:
+                "Use the automatically injected shared context, write a relative workspace file, run a code validation, and publish the artifact.",
+              expectedOutput:
+                "outputs/result.txt and a Runtime Smoke Artifact.",
+              doneCriteria: [
+                "The file exists",
+                "The artifact is published",
+                "The todo summary includes refs",
+              ],
+            },
+          ],
         });
       }
 
@@ -137,10 +192,12 @@ class FakeProvider {
         this.finalizing = true;
         return this.toolCall("finish_task", {
           status: "completed",
-          answer: "Smoke task completed with a relative workspace file and published artifact.",
+          answer:
+            "Smoke task completed with a relative workspace file and published artifact.",
           artifactRefs: ["Runtime Smoke Artifact"],
           fileRefs: ["outputs/result.txt"],
-          summary: "Validated planning, record notes, narrow tools, relative paths, and finalization."
+          summary:
+            "Validated planning, selective shared context, narrow tools, relative paths, and finalization.",
         });
       }
 
@@ -153,9 +210,9 @@ class FakeProvider {
 
     if (todoId === "capture-context") {
       if (state === 0) {
-        return this.toolCall("record_note", {
+        return this.toolCall("share_context", {
           title: "Smoke context",
-          content: "recorded context"
+          content: "recorded context",
         });
       }
 
@@ -164,7 +221,8 @@ class FakeProvider {
           action: "complete",
           todoId,
           summary: "Recorded reusable smoke context.",
-          nextContext: "Use the Smoke context record note in the next todo."
+          nextContext:
+            "Use the automatically injected Smoke context in the next todo.",
         });
       }
 
@@ -173,47 +231,47 @@ class FakeProvider {
 
     if (todoId === "produce-file") {
       if (state === 0) {
-        return this.toolCall("read_record", {
-          id: readRecordId(request)
+        assert.match(
+          request.messages.map((message) => message.content ?? "").join("\n"),
+          /Shared context from an earlier todo[\s\S]*recorded context/,
+        );
+        return this.toolCall("write_file", {
+          path: "outputs/result.txt",
+          content: "recorded context -> file output\n",
         });
       }
 
       if (state === 1) {
-        return this.toolCall("write_file", {
-          path: "outputs/result.txt",
-          content: "recorded context -> file output\n"
+        return this.toolCall("run_node", {
+          code: "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());",
         });
       }
 
       if (state === 2) {
-        return this.toolCall("run_node", {
-          code: "import { readFileSync } from 'node:fs'; console.log(readFileSync('outputs/result.txt', 'utf8').trim());"
-        });
-      }
-
-      if (state === 3) {
         return this.toolCall("publish_artifact", {
           kind: "text",
           title: "Runtime Smoke Artifact",
           source: {
             type: "file",
-            path: "outputs/result.txt"
+            path: "outputs/result.txt",
           },
           display: {
-            mode: "button"
-          }
+            mode: "button",
+          },
         });
       }
 
-      if (state === 4) {
+      if (state === 3) {
         return this.toolCall("plan_todos", {
           action: "complete",
           todoId,
-          summary: "Wrote outputs/result.txt, validated it with Node.js, and published the Runtime Smoke Artifact.",
+          summary:
+            "Wrote outputs/result.txt, validated it with Node.js, and published the Runtime Smoke Artifact.",
           artifactRefs: ["Runtime Smoke Artifact"],
           fileRefs: ["outputs/result.txt"],
           evidenceRefs: ["run_node: recorded context -> file output"],
-          nextContext: "Final response should mention outputs/result.txt and Runtime Smoke Artifact."
+          nextContext:
+            "Final response should mention outputs/result.txt and Runtime Smoke Artifact.",
         });
       }
 
@@ -233,9 +291,9 @@ class FakeProvider {
         {
           id: `call_${this.calls}`,
           name,
-          arguments: JSON.stringify(args)
-        }
-      ]
+          arguments: JSON.stringify(args),
+        },
+      ],
     };
   }
 
@@ -244,13 +302,25 @@ class FakeProvider {
       provider: this.id,
       model: this.model,
       content,
-      finishReason: "stop"
+      finishReason: "stop",
     };
   }
 }
 
 function assertNoOldToolNames(toolNames) {
-  const oldNames = new Set(["file", "command", "code", "browser", "artifact", "context", "write_todos", "read_skill_file", "create_artifact"]);
+  const oldNames = new Set([
+    "file",
+    "command",
+    "code",
+    "browser",
+    "artifact",
+    "context",
+    "write_todos",
+    "read_skill_file",
+    "create_artifact",
+    "record_note",
+    "read_record",
+  ]);
   const leaked = toolNames.filter((name) => oldNames.has(name));
   assert.deepEqual(leaked, []);
 }
@@ -258,34 +328,34 @@ function assertNoOldToolNames(toolNames) {
 function assertNoPathLeaks(request, needles) {
   const payload = JSON.stringify({
     messages: request.messages,
-    tools: request.tools
+    tools: request.tools,
   });
 
   for (const needle of needles) {
     const index = payload.indexOf(needle);
-    const excerpt = index === -1 ? "" : payload.slice(Math.max(0, index - 160), index + needle.length + 160);
-    assert.equal(index, -1, `LLM request leaked local absolute path: ${needle}\n${excerpt}`);
+    const excerpt =
+      index === -1
+        ? ""
+        : payload.slice(Math.max(0, index - 160), index + needle.length + 160);
+    assert.equal(
+      index,
+      -1,
+      `LLM request leaked local absolute path: ${needle}\n${excerpt}`,
+    );
   }
 }
 
 function readCurrentTodoId(request) {
-  const payload = request.messages.map((message) => message.content ?? "").join("\n");
+  const payload = request.messages
+    .map((message) => message.content ?? "")
+    .join("\n");
   const match = payload.match(/"currentTodo"\s*:\s*{\s*"id"\s*:\s*"([^"]+)"/);
 
   if (!match) {
-    throw new Error("Could not locate currentTodo.id in fake provider request.");
+    throw new Error(
+      "Could not locate currentTodo.id in fake provider request.",
+    );
   }
 
   return match[1];
-}
-
-function readRecordId(request) {
-  const payload = request.messages.map((message) => message.content ?? "").join("\n");
-  const match = payload.match(/rec_[0-9a-f-]+/i);
-
-  if (!match) {
-    throw new Error("Could not locate record note id in fake provider request.");
-  }
-
-  return match[0];
 }

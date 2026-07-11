@@ -128,22 +128,15 @@ export type TodoCompletion = {
   missingCriteria?: string[];
 };
 
-export type RecordNote = {
-  id: string;
+export type SharedContext = {
   runId: string;
   chatId: string;
-  todoId?: string;
-  todoTitle?: string;
+  sourceTodoId?: string;
+  sourceTodoTitle?: string;
   executionNodeId?: string;
   title: string;
   content: string;
   createdAt: string;
-};
-
-export type ContextRecordNote = Omit<RecordNote, "content"> & {
-  content: string;
-  truncated: boolean;
-  contentChars: number;
 };
 
 export type ContextPack = {
@@ -153,7 +146,6 @@ export type ContextPack = {
   todoPlan: Todo[];
   previousCompletions: TodoCompletion[];
   carryForwardSummary: string;
-  recordNotes: ContextRecordNote[];
 };
 
 export type AgentRunInput = {

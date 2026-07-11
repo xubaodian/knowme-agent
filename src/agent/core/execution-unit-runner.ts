@@ -14,8 +14,7 @@ import type { AgentEventBus } from "./event-bus.js";
 
 const executionToolNames = [
   "plan_todos",
-  "record_note",
-  "read_record",
+  "share_context",
   "publish_artifact",
   "list_files",
   "read_file",
@@ -128,6 +127,15 @@ export class ExecutionUnitRunner {
             role: "system",
             content: await buildExecutionPrompt({ contextPack })
           },
+          ...this.input.contextManager.getSharedContexts().map((context) => ({
+            role: "system" as const,
+            content: [
+              "Shared context from an earlier todo. Treat it as established run context for the current todo.",
+              `Source todo: ${context.sourceTodoId ?? "runtime"}`,
+              `Title: ${context.title}`,
+              context.content
+            ].join("\n")
+          })),
           {
             role: "user",
             content: JSON.stringify({

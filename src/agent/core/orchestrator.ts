@@ -7,7 +7,7 @@ import { TaskStateManager } from "../task/task-state-manager.js";
 import { TodoManager } from "../todos/todo-manager.js";
 import { createArtifactTools } from "../tools/artifact-tools.js";
 import { createFinishTaskTools } from "../tools/finish-task-tool.js";
-import { createRecordNoteTools } from "../tools/record-note-tool.js";
+import { createSharedContextTools } from "../tools/shared-context-tool.js";
 import { LocalSandboxAdapter } from "../tools/sandbox/local-sandbox-adapter.js";
 import { createSandboxTools } from "../tools/sandbox/sandbox-tools.js";
 import { createTodoTools } from "../tools/todo-tools.js";
@@ -68,7 +68,7 @@ export class AgentOrchestrator {
       ...createTodoTools(),
       ...createArtifactTools(),
       ...createFinishTaskTools(),
-      ...createRecordNoteTools(),
+      ...createSharedContextTools(),
       ...createSandboxTools()
     ]);
     runLogger.event("tool.registry.ready", {

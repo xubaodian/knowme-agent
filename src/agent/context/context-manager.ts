@@ -1,4 +1,4 @@
-import type { ContextPack, ContextRecordNote, ExecutionProfile, RecordNote, Todo, TodoCompletion } from "../types.js";
+import type { ContextPack, ExecutionProfile, SharedContext, Todo, TodoCompletion } from "../types.js";
 
 export type TodoContextCommit = {
   todoId: string;
@@ -12,7 +12,7 @@ export type TodoContextCommit = {
 export class ContextManager {
   private readonly commits: TodoContextCommit[] = [];
   private readonly completions: TodoCompletion[] = [];
-  private readonly recordNotes: RecordNote[] = [];
+  private readonly sharedContexts: SharedContext[] = [];
 
   commitTodo(commit: TodoContextCommit): void {
     this.commits.push({
@@ -36,12 +36,21 @@ export class ContextManager {
   }
 
   getSharedSummary(): string {
-    if (this.completions.length === 0 && this.commits.length === 0) {
+    if (this.completions.length === 0 && this.commits.length === 0 && this.sharedContexts.length === 0) {
       return "暂无上游 todo 输出。";
     }
 
-    if (this.completions.length > 0) {
-      return this.completions
+    const completionSummary = this.getTodoSummary();
+    const sharedSummary = this.sharedContexts
+      .map((context) => `- Shared by ${context.sourceTodoId ?? "runtime"} · ${context.title}: ${context.content}`)
+      .join("\n");
+
+    return [completionSummary, sharedSummary ? `Shared context:\n${sharedSummary}` : undefined].filter(Boolean).join("\n");
+  }
+
+  private getTodoSummary(): string {
+    const completionSummary = this.completions.length > 0
+      ? this.completions
         .map((completion) => {
           const refs = [
             completion.artifactRefs.length ? `artifacts=${completion.artifactRefs.join(", ")}` : undefined,
@@ -52,10 +61,10 @@ export class ContextManager {
 
           return `- ${completion.todoId}: ${completion.nextContextSummary || completion.completedWork}${refs.length ? ` (${refs.join("; ")})` : ""}`;
         })
-        .join("\n");
-    }
+        .join("\n")
+      : this.commits.map((commit) => `- ${commit.todoId}: ${commit.summary}`).join("\n");
 
-    return this.commits.map((commit) => `- ${commit.todoId}: ${commit.summary}`).join("\n");
+    return completionSummary || "暂无上游 todo 输出。";
   }
 
   getCommits(): TodoContextCommit[] {
@@ -72,7 +81,7 @@ export class ContextManager {
     return this.completions.map(cloneCompletion);
   }
 
-  recordNote(
+  shareContext(
     input: { title: string; content: string },
     binding: {
       runId: string;
@@ -81,38 +90,45 @@ export class ContextManager {
       todoTitle?: string;
       executionNodeId?: string;
     }
-  ): RecordNote {
-    const note: RecordNote = {
-      id: `rec_${crypto.randomUUID()}`,
+  ): SharedContext {
+    const sharedContext: SharedContext = {
       runId: binding.runId,
       chatId: binding.chatId,
-      todoId: binding.todoId,
-      todoTitle: binding.todoTitle,
+      sourceTodoId: binding.todoId,
+      sourceTodoTitle: binding.todoTitle,
       executionNodeId: binding.executionNodeId,
       title: input.title.trim(),
       content: input.content.trim(),
       createdAt: new Date().toISOString()
     };
 
-    if (!note.title) {
-      throw new Error("record_note title is required.");
+    if (!sharedContext.title) {
+      throw new Error("share_context title is required.");
     }
 
-    if (!note.content) {
-      throw new Error("record_note content is required.");
+    if (!sharedContext.content) {
+      throw new Error("share_context content is required.");
     }
 
-    this.recordNotes.push(note);
-    return cloneRecordNote(note);
+    if (sharedContext.content.length > 2000) {
+      throw new Error("share_context content must be 2000 characters or fewer. Put large content in a workspace file.");
+    }
+
+    const existing = this.sharedContexts.find((context) => context.sourceTodoId === sharedContext.sourceTodoId);
+
+    if (existing) {
+      existing.title = sharedContext.title;
+      existing.content = sharedContext.content;
+      existing.executionNodeId = sharedContext.executionNodeId;
+      return cloneSharedContext(existing);
+    }
+
+    this.sharedContexts.push(sharedContext);
+    return cloneSharedContext(sharedContext);
   }
 
-  getRecordNotes(): RecordNote[] {
-    return this.recordNotes.map(cloneRecordNote);
-  }
-
-  getRecordById(id: string): RecordNote | undefined {
-    const note = this.recordNotes.find((item) => item.id === id);
-    return note ? cloneRecordNote(note) : undefined;
+  getSharedContexts(): SharedContext[] {
+    return this.sharedContexts.map(cloneSharedContext);
   }
 
   buildContextPack(input: {
@@ -127,21 +143,8 @@ export class ContextManager {
       currentTodo: { ...input.currentTodo },
       todoPlan: input.todoPlan.map((todo) => ({ ...todo })),
       previousCompletions: this.getCompletions(),
-      carryForwardSummary: this.getSharedSummary(),
-      recordNotes: this.getRecordNotesForContext()
+      carryForwardSummary: this.getTodoSummary()
     };
-  }
-
-  private getRecordNotesForContext(): ContextRecordNote[] {
-    return this.recordNotes.map((note) => {
-      const truncated = note.content.length > 2000;
-      return {
-        ...cloneRecordNote(note),
-        content: truncated ? `${note.content.slice(0, 500)}\n...<truncated; read full record by id ${note.id}>` : note.content,
-        truncated,
-        contentChars: note.content.length
-      };
-    });
   }
 }
 
@@ -157,8 +160,8 @@ function cloneCompletion(completion: TodoCompletion): TodoCompletion {
   };
 }
 
-function cloneRecordNote(note: RecordNote): RecordNote {
-  return { ...note };
+function cloneSharedContext(context: SharedContext): SharedContext {
+  return { ...context };
 }
 
 function sanitizeProfileForContext(profile: ExecutionProfile): ExecutionProfile {

@@ -388,6 +388,8 @@ function toolTitle(name: string): string {
       return "读取页面结构";
     case "publish_artifact":
       return "登记产物";
+    case "share_context":
+      return "共享上下文";
     case "record_note":
       return "记录笔记";
     case "read_record":
