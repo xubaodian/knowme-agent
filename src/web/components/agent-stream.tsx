@@ -128,7 +128,7 @@ export function AgentStream({
 
   return (
     <section className="grid h-full min-h-0 min-w-0 overflow-hidden grid-rows-[4rem_minmax(0,1fr)_auto] bg-workspace">
-      <header className="flex h-16 shrink-0 items-center justify-between px-6 backdrop-blur-xl">
+      <header className="flex h-16 shrink-0 items-center justify-between px-7">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold">knowme-agent</h2>
           <p className="truncate text-xs text-muted-foreground">{activeChat?.title ?? "New task"}</p>
@@ -144,7 +144,7 @@ export function AgentStream({
         onScroll={handleFlowScroll}
         ref={flowRef}
       >
-        <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-8 px-6 py-7">
+        <div className="mx-auto flex w-full min-w-0 max-w-[820px] flex-col gap-7 px-7 py-7">
           {sortedMessages.length === 0 && sortedRuns.length === 0 ? <WelcomeCard /> : null}
 
           {sortedMessages.map((message) => {
@@ -190,8 +190,8 @@ export function AgentStream({
         </div>
       </div>
 
-      <footer className="shrink-0 bg-workspace px-6 py-4 backdrop-blur-xl" data-agent-composer>
-        <form className="glass-strong relative mx-auto w-full max-w-3xl rounded-lg p-2" onSubmit={handleSubmit}>
+      <footer className="shrink-0 bg-workspace px-7 py-4" data-agent-composer>
+        <form className="glass-strong relative mx-auto w-full max-w-[820px] rounded-2xl p-2" onSubmit={handleSubmit}>
           <Textarea
             aria-label="Message"
             className="max-h-40 min-h-20 resize-none bg-transparent px-3 pb-11 pt-3 shadow-none focus-visible:ring-0"
@@ -283,10 +283,10 @@ function AgentRunCard({
   const isRunning = run.status === "queued" || run.status === "running";
 
   return (
-    <div className="flex gap-3">
-      <AgentAvatar />
-      <div className="min-w-0 flex-1 space-y-5">
-        <div>
+    <article className="rounded-3xl bg-card/55 p-5 shadow-[var(--shadow-soft)]">
+      <div className="flex items-start gap-3">
+        <AgentAvatar />
+        <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <AgentName />
             <Badge variant={run.status === "completed" ? "success" : "outline"}>{run.status}</Badge>
@@ -295,10 +295,12 @@ function AgentRunCard({
             {[run.skillName ?? "general-agent", run.model].filter(Boolean).join(" / ") || run.id}
           </p>
         </div>
+      </div>
 
+      <div className="relative ml-4 mt-5 border-l border-primary/15 pl-7">
         {isRunning ? <RunActivity events={events} flow={flow} /> : null}
 
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {!hasVisibleWork ? <ProgressLine icon={<LoaderCircle className="size-4 animate-spin" />} title="正在等待执行进展" detail={run.id} /> : null}
           {flow.planning ? <PlanningBlock planning={flow.planning} /> : null}
           {flow.todos.map((todo, index) => (
@@ -324,7 +326,7 @@ function AgentRunCard({
           <FinalMessage key={message.id} message={message} />
         ))}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -344,7 +346,7 @@ function RunActivity({ events, flow }: { events: RunEvent[]; flow: RunFlowViewMo
   const detail = activeAction?.detail ?? activeTodo?.summary ?? activeEvent?.detail ?? "正在接收执行结果…";
 
   return (
-    <div aria-live="polite" className="flex min-w-0 items-start gap-3 rounded-lg bg-primary/8 px-4 py-3 text-sm">
+    <div aria-live="polite" className="mb-3 flex min-w-0 items-start gap-3 rounded-2xl bg-primary/7 px-4 py-3 text-sm">
       <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/15 text-primary">
         <LoaderCircle className="size-4 animate-spin" />
       </span>
@@ -358,22 +360,22 @@ function RunActivity({ events, flow }: { events: RunEvent[]; flow: RunFlowViewMo
 
 function PlanningBlock({ planning }: { planning: RunFlowPlanning }) {
   return (
-    <details className="group rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]" open={planning.status === "running"}>
+    <details className="flow-step group rounded-2xl bg-muted/28 px-4 py-3.5" open={planning.status === "running"}>
       <summary className="flex cursor-pointer list-none items-center gap-3">
         <StatusDot status={planning.status === "completed" ? "completed" : "running"} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="font-medium text-foreground">已制定执行计划</p>
-            <Badge variant="outline">{planning.todos.length} todos</Badge>
+            <Badge variant="outline">{planning.todos.length} 个步骤</Badge>
           </div>
           {planning.goal ? <p className="mt-1 truncate text-sm text-muted-foreground">{planning.goal}</p> : null}
         </div>
       </summary>
 
       {planning.todos.length > 0 ? (
-        <div className="mt-4 space-y-3 pl-8">
+        <div className="mt-3 space-y-2 pt-2 pl-8">
           {planning.todos.map((todo, index) => (
-            <div className="rounded-md bg-background/45 px-3 py-2" key={todo.id}>
+            <div className="rounded-lg bg-muted/35 px-3 py-2" key={todo.id}>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
                 <p className="text-sm font-medium text-foreground">{todo.title}</p>
@@ -401,12 +403,12 @@ function TodoBlock({
   todo: RunFlowTodo;
 }) {
   return (
-    <details className="group rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]" open={todo.status === "in_progress"}>
+    <details className="flow-step group rounded-2xl bg-muted/28 px-4 py-3.5 transition-colors hover:bg-muted/40" open={todo.status === "in_progress"}>
       <summary className="flex cursor-pointer list-none items-start gap-3">
         <StatusDot status={todo.status} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-medium text-foreground">Todo {index + 1}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">步骤 {index + 1}</p>
             <span className="text-sm text-muted-foreground">·</span>
             <p className="min-w-0 text-sm font-medium text-foreground">{todo.title}</p>
             <Badge variant={todo.status === "completed" ? "success" : todo.status === "failed" ? "warning" : "outline"}>
@@ -418,10 +420,10 @@ function TodoBlock({
         </div>
       </summary>
 
-      <div className="mt-4">
+      <div className="mt-3 pt-2 pl-8">
         {todo.summary ? (
-          <div className="rounded-md bg-background/45 px-3 py-2">
-            <p className="text-xs font-medium text-muted-foreground">Summary</p>
+          <div className="rounded-lg bg-muted/35 px-3 py-2">
+            <p className="text-xs font-medium text-muted-foreground">执行摘要</p>
             <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-foreground">{todo.summary}</p>
           </div>
         ) : null}
@@ -448,10 +450,10 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
 
 function FinalMessage({ message }: { message: ChatMessage }) {
   return (
-    <div className="rounded-lg bg-card/60 p-4 shadow-[var(--shadow-soft)]">
+    <div className="mt-3 rounded-2xl bg-emerald-500/6 p-4">
       <div className="flex items-center gap-3">
         <CheckCircle2 className="size-5 text-emerald-300" />
-        <p className="font-medium text-foreground">Final</p>
+        <p className="font-medium text-foreground">任务结果</p>
       </div>
       <p className="mt-3 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-foreground">{message.content}</p>
     </div>
@@ -460,7 +462,7 @@ function FinalMessage({ message }: { message: ChatMessage }) {
 
 function ActionList({ actions }: { actions: RunFlowAction[] }) {
   return (
-    <div className="mt-4 space-y-2 pl-8">
+    <div className="mt-3 space-y-2">
       {actions.map((action) => (
         <ActionLine action={action} key={action.id} />
       ))}
@@ -470,7 +472,7 @@ function ActionList({ actions }: { actions: RunFlowAction[] }) {
 
 function ActionLine({ action }: { action: RunFlowAction }) {
   return (
-    <details className="group rounded-md bg-background/45 px-3 py-2">
+    <details className="group rounded-lg bg-muted/35 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-start gap-3 text-sm">
         <StatusIcon status={action.status} />
         <div className="min-w-0 flex-1">
@@ -499,7 +501,7 @@ function ArtifactList({
   selectedArtifactId?: string;
 }) {
   return (
-    <div className="mt-4 flex flex-wrap gap-2 pl-8">
+    <div className="mt-3 flex flex-wrap gap-2">
       {artifacts.map((artifact) => (
         <ArtifactEvent
           artifact={artifact}

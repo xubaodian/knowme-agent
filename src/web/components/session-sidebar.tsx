@@ -25,10 +25,10 @@ export function SessionSidebar({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
-    <aside className="relative flex min-h-0 flex-col bg-sidebar backdrop-blur-xl">
+    <aside className="relative flex min-h-0 flex-col bg-sidebar max-lg:hidden">
       <div className="flex h-16 shrink-0 items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="grid size-9 place-items-center rounded-md bg-primary/15 text-primary shadow-[0_10px_28px_rgba(37,208,186,0.12)]">
+          <div className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
             <Bot className="size-5" />
           </div>
           <div className="min-w-0">
@@ -61,9 +61,9 @@ export function SessionSidebar({
           ) : (
             chats.map((chat) => (
               <button
-                className={`w-full rounded-md px-3 py-2 text-left transition-colors ${
+                className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
                   chat.id === selectedChatId
-                    ? "bg-primary/15 text-foreground shadow-[0_10px_24px_rgba(37,208,186,0.1)]"
+                    ? "bg-primary/10 text-foreground"
                     : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                 }`}
                 key={chat.id}
@@ -159,7 +159,7 @@ function ThemeOption({
   return (
     <button
       className={`flex h-10 items-center justify-between rounded-md px-3 text-sm transition-colors ${
-        isSelected ? "bg-primary/15 text-foreground shadow-[0_10px_24px_rgba(37,208,186,0.1)]" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+        isSelected ? "bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
       }`}
       onClick={onClick}
       type="button"

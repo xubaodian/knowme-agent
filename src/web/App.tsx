@@ -5,7 +5,7 @@ import { createChat, getChatTimeline, listChats, listLlmModels, listSkills, send
 import { AgentStream } from "./components/agent-stream";
 import { DebugRunsPage } from "./components/debug-runs-page";
 import { NewTaskComposer } from "./components/new-task-composer";
-import { SandboxPanel } from "./components/sandbox-panel";
+import { ArtifactPreviewPanel } from "./components/artifact-preview-panel";
 import { SessionSidebar } from "./components/session-sidebar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import type { ThemeMode } from "./lib/theme";
@@ -260,7 +260,7 @@ export function App() {
 
   return (
     <main className="app-shell h-screen overflow-hidden text-foreground" data-theme={theme}>
-      <div className="grid h-full grid-cols-[260px_minmax(0,1fr)] max-lg:grid-cols-1 max-lg:grid-rows-[220px_minmax(0,1fr)]">
+      <div className="grid h-full grid-cols-[248px_minmax(0,1fr)] max-lg:grid-cols-1">
         <SessionSidebar
           chats={chats}
           isNewTaskActive={isNewTaskDraft || !selectedChatId}
@@ -310,7 +310,7 @@ export function App() {
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel defaultSize={44} minSize={30}>
-              <SandboxPanel
+              <ArtifactPreviewPanel
                 activeRun={activeRun}
                 artifacts={activeRun ? artifactsByRun[activeRun.id] ?? [] : []}
                 events={activeRunEvents}

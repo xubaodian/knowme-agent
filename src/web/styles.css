@@ -20,8 +20,8 @@
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-workspace: var(--workspace);
-  --color-sandbox: var(--sandbox);
-  --color-sandbox-surface: var(--sandbox-surface);
+  --color-preview: var(--preview);
+  --color-preview-surface: var(--preview-surface);
   --color-user-message: var(--user-message);
   --color-code: var(--code);
   --color-code-foreground: var(--code-foreground);
@@ -47,8 +47,8 @@
   --ring: #25d0ba;
   --sidebar: rgba(10, 14, 20, 0.78);
   --workspace: rgba(13, 17, 23, 0.72);
-  --sandbox: rgba(9, 13, 19, 0.74);
-  --sandbox-surface: rgba(7, 11, 17, 0.82);
+  --preview: rgba(9, 13, 19, 0.74);
+  --preview-surface: rgba(7, 11, 17, 0.82);
   --user-message: rgba(37, 208, 186, 0.12);
   --code: #050a10;
   --code-foreground: #e5e7eb;
@@ -58,8 +58,8 @@
   --ambient-top: rgba(37, 208, 186, 0.12);
   --ambient-side: rgba(88, 122, 255, 0.08);
   --grid-line: rgba(147, 167, 192, 0.055);
-  --shadow-panel: 0 18px 55px rgba(0, 0, 0, 0.24);
-  --shadow-soft: 0 10px 32px rgba(0, 0, 0, 0.18);
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.2);
+  --shadow-soft: 0 4px 18px rgba(0, 0, 0, 0.12);
 }
 
 [data-theme="dark"] {
@@ -82,8 +82,8 @@
   --ring: #25d0ba;
   --sidebar: rgba(10, 14, 20, 0.78);
   --workspace: rgba(13, 17, 23, 0.72);
-  --sandbox: rgba(9, 13, 19, 0.74);
-  --sandbox-surface: rgba(7, 11, 17, 0.82);
+  --preview: rgba(9, 13, 19, 0.74);
+  --preview-surface: rgba(7, 11, 17, 0.82);
   --user-message: rgba(37, 208, 186, 0.12);
   --code: #050a10;
   --code-foreground: #e5e7eb;
@@ -93,43 +93,43 @@
   --ambient-top: rgba(37, 208, 186, 0.12);
   --ambient-side: rgba(88, 122, 255, 0.08);
   --grid-line: rgba(147, 167, 192, 0.055);
-  --shadow-panel: 0 18px 55px rgba(0, 0, 0, 0.24);
-  --shadow-soft: 0 10px 32px rgba(0, 0, 0, 0.18);
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.2);
+  --shadow-soft: 0 4px 18px rgba(0, 0, 0, 0.12);
 }
 
 [data-theme="light"] {
-  --background: #f5f8fc;
+  --background: #eef3f5;
   --foreground: #121a2a;
-  --card: rgba(255, 255, 255, 0.8);
+  --card: rgba(255, 255, 255, 0.72);
   --card-foreground: #121a2a;
   --popover: rgba(255, 255, 255, 0.96);
   --popover-foreground: #121a2a;
   --primary: #1f8d82;
   --primary-foreground: #ffffff;
-  --secondary: rgba(227, 235, 245, 0.82);
+  --secondary: rgba(224, 233, 239, 0.78);
   --secondary-foreground: #263548;
-  --muted: rgba(232, 238, 247, 0.78);
-  --muted-foreground: #667085;
+  --muted: rgba(222, 231, 237, 0.72);
+  --muted-foreground: #687689;
   --accent: rgba(75, 96, 215, 0.12);
   --accent-foreground: #253366;
-  --border: rgba(72, 91, 117, 0.16);
+  --border: rgba(72, 91, 117, 0.1);
   --input: rgba(72, 91, 117, 0.18);
   --ring: #1f8d82;
-  --sidebar: rgba(245, 248, 252, 0.76);
-  --workspace: rgba(255, 255, 255, 0.72);
-  --sandbox: rgba(244, 247, 251, 0.76);
-  --sandbox-surface: rgba(255, 255, 255, 0.82);
+  --sidebar: #eaf0f3;
+  --workspace: #f7f9fa;
+  --preview: #edf2f4;
+  --preview-surface: rgba(251, 252, 253, 0.92);
   --user-message: rgba(31, 141, 130, 0.1);
   --code: #161b26;
   --code-foreground: #dbe7f3;
   --surface-panel: rgba(255, 255, 255, 0.68);
-  --surface-strong: rgba(255, 255, 255, 0.9);
+  --surface-strong: rgba(255, 255, 255, 0.82);
   --surface-subtle: rgba(18, 26, 42, 0.035);
   --ambient-top: rgba(31, 141, 130, 0.1);
   --ambient-side: rgba(75, 96, 215, 0.08);
   --grid-line: rgba(72, 91, 117, 0.06);
-  --shadow-panel: 0 18px 55px rgba(56, 72, 97, 0.12);
-  --shadow-soft: 0 10px 32px rgba(56, 72, 97, 0.1);
+  --shadow-panel: 0 24px 70px rgba(67, 84, 99, 0.12);
+  --shadow-soft: 0 8px 28px rgba(67, 84, 99, 0.07);
 }
 
 * {
@@ -171,16 +171,7 @@ iframe {
 
 .app-shell {
   background-color: var(--background);
-  background-image:
-    linear-gradient(180deg, var(--ambient-top), transparent 36%),
-    linear-gradient(120deg, transparent 0%, var(--ambient-side) 48%, transparent 100%),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    linear-gradient(180deg, var(--grid-line) 1px, transparent 1px);
-  background-size:
-    auto,
-    auto,
-    44px 44px,
-    44px 44px;
+  background-image: linear-gradient(135deg, var(--ambient-top), transparent 28%, var(--ambient-side));
 }
 
 .glass-panel {
@@ -191,8 +182,25 @@ iframe {
 
 .glass-strong {
   background: var(--surface-strong);
-  box-shadow: var(--shadow-panel);
+  box-shadow: var(--shadow-soft);
   backdrop-filter: blur(20px);
+}
+
+.flow-step {
+  position: relative;
+}
+
+.flow-step::before {
+  position: absolute;
+  top: 1.15rem;
+  left: -2rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border: 2px solid var(--workspace);
+  border-radius: 999px;
+  background: var(--primary);
+  content: "";
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 32%, transparent);
 }
 
 * {

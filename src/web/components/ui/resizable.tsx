@@ -25,7 +25,7 @@ export const ResizableHandle = ({
     {...props}
   >
     {withHandle ? (
-      <div className="glass-panel z-10 flex h-8 w-5 items-center justify-center rounded-md text-muted-foreground">
+      <div className="z-10 flex h-9 w-4 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow-sm">
         <GripVertical className="size-3.5" />
       </div>
     ) : null}
