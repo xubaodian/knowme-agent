@@ -117,10 +117,10 @@ export function ArtifactKindIcon({ artifact }: { artifact: Artifact }) {
 
 function TextArtifactPreview({ artifact }: { artifact: TextArtifact }) {
   if (artifact.kind === "markdown") {
-    return <div className="space-y-3 p-5">{renderMarkdown(artifact.content)}</div>;
+    return <div className="h-full min-h-0 overflow-auto p-5"><div className="space-y-3">{renderMarkdown(artifact.content)}</div></div>;
   }
 
-  return <pre className="whitespace-pre-wrap p-5 text-sm leading-6">{artifact.content}</pre>;
+  return <pre className="h-full min-h-0 overflow-auto whitespace-pre-wrap p-5 text-sm leading-6">{artifact.content}</pre>;
 }
 
 function CodeArtifactPreview({ artifact }: { artifact: CodeArtifact }) {

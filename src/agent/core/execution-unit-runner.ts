@@ -5,7 +5,13 @@ import type { ContextManager } from "../context/context-manager.js";
 import type { LlmProvider } from "../llm/types.js";
 import { buildExecutionPrompt } from "../prompts/runtime-prompts.js";
 import type { TodoManager } from "../todos/todo-manager.js";
-import type { ContextPack, ExecutionProfile, Todo, TodoCompletion, TodoOutputRef } from "../types.js";
+import type {
+  ContextPack,
+  ExecutionProfile,
+  Todo,
+  TodoCompletion,
+  TodoOutputRef,
+} from "../types.js";
 import type { ToolRegistry } from "../tools/tool-registry.js";
 import type { ToolRunner } from "../tools/tool-runner.js";
 import type { AgentLoopToolResult } from "./agent-loop.js";
@@ -28,7 +34,7 @@ const executionToolNames = [
   "browser_click",
   "browser_type",
   "browser_screenshot",
-  "browser_get_dom"
+  "browser_get_dom",
 ];
 
 export type ExecutionUnitRunnerInput = {
@@ -53,22 +59,32 @@ export class ExecutionUnitRunner {
 
     this.input.eventBus.runLogger.event("runtime.execution_units.start", {
       todoCount: currentTodos.length,
-      todoIds: currentTodos.map((todo) => todo.id)
+      todoIds: currentTodos.map((todo) => todo.id),
     });
 
     for (const [index, todo] of currentTodos.entries()) {
-      currentTodos = await this.runOne(todo, currentTodos, index + 1, currentTodos.length);
+      currentTodos = await this.runOne(
+        todo,
+        currentTodos,
+        index + 1,
+        currentTodos.length,
+      );
     }
 
     this.input.eventBus.runLogger.event("runtime.execution_units.end", {
       todoCount: currentTodos.length,
-      completionCount: this.input.contextManager.getCompletions().length
+      completionCount: this.input.contextManager.getCompletions().length,
     });
 
     return currentTodos;
   }
 
-  private async runOne(todo: Todo, todoPlan: Todo[], index: number, total: number): Promise<Todo[]> {
+  private async runOne(
+    todo: Todo,
+    todoPlan: Todo[],
+    index: number,
+    total: number,
+  ): Promise<Todo[]> {
     const traceNodeId = await this.input.trace?.startNode({
       id: `unit_${todo.id}`,
       parentId: this.input.parentTraceId ?? this.input.trace.rootNodeId,
@@ -79,18 +95,21 @@ export class ExecutionUnitRunner {
         todo,
         index,
         total,
-        contextPack: this.buildContextPack(todo, todoPlan)
+        contextPack: this.buildContextPack(todo, todoPlan),
       },
       metadata: {
         phase: "execution",
         todoId: todo.id,
         todoIndex: index,
-        todoCount: total
-      }
+        todoCount: total,
+      },
     });
 
     this.input.eventBus.setActiveStep({ id: todo.id, title: todo.title });
-    this.input.eventBus.setActiveNode({ id: traceNodeId ?? todo.id, parentId: this.input.parentTraceId });
+    this.input.eventBus.setActiveNode({
+      id: traceNodeId ?? todo.id,
+      parentId: this.input.parentTraceId,
+    });
 
     try {
       this.input.eventBus.runLogger.event("runtime.execution_unit.start", {
@@ -99,17 +118,24 @@ export class ExecutionUnitRunner {
         todoIndex: index,
         todoCount: total,
         doneCriteria: todo.doneCriteria,
-        expectedOutput: todo.expectedOutput
+        expectedOutput: todo.expectedOutput,
       });
 
       await this.input.toolRunner.run(
         "plan_todos",
         { action: "start", todoId: todo.id },
-        { traceParentId: traceNodeId, traceMetadata: { phase: "execution", todoId: todo.id } }
+        {
+          traceParentId: traceNodeId,
+          traceMetadata: { phase: "execution", todoId: todo.id },
+        },
       );
 
-      const artifactsBefore = this.input.artifactManager.getPublishedArtifacts().length;
-      const contextPack = this.buildContextPack({ ...todo, status: "in_progress" }, this.input.todoManager.getSnapshot());
+      const artifactsBefore =
+        this.input.artifactManager.getPublishedArtifacts().length;
+      const contextPack = this.buildContextPack(
+        { ...todo, status: "in_progress" },
+        this.input.todoManager.getSnapshot(),
+      );
       const result = await runAgentLoop({
         name: `Execution unit ${todo.id}`,
         llmProvider: this.input.llmProvider,
@@ -121,11 +147,11 @@ export class ExecutionUnitRunner {
         allowedTools: executionToolNames,
         requireFinalContent: false,
         allowSyntheticFinalContent: true,
-        maxIterations: 24,
+        maxIterations: 80,
         llmMessages: [
           {
             role: "system",
-            content: await buildExecutionPrompt({ contextPack })
+            content: await buildExecutionPrompt({ contextPack }),
           },
           ...this.input.contextManager.getSharedContexts().map((context) => ({
             role: "system" as const,
@@ -133,23 +159,31 @@ export class ExecutionUnitRunner {
               "Shared context from an earlier todo. Treat it as established run context for the current todo.",
               `Source todo: ${context.sourceTodoId ?? "runtime"}`,
               `Title: ${context.title}`,
-              context.content
-            ].join("\n")
+              context.content,
+            ].join("\n"),
           })),
           {
             role: "user",
             content: JSON.stringify({
-              instruction: "Execute only the current todo. Complete or fail it with plan_todos before stopping.",
-              currentTodo: contextPack.currentTodo
-            })
-          }
-        ]
+              instruction:
+                "Execute only the current todo. Complete or fail it with plan_todos before stopping.",
+              currentTodo: contextPack.currentTodo,
+            }),
+          },
+        ],
       });
-      const newArtifacts = this.input.artifactManager.getPublishedArtifacts().slice(artifactsBefore);
+      const newArtifacts = this.input.artifactManager
+        .getPublishedArtifacts()
+        .slice(artifactsBefore);
       let latestTodo = this.findTodo(todo.id) ?? todo;
 
       if (latestTodo.status !== "completed" && latestTodo.status !== "failed") {
-        const fallbackCompletion = buildFallbackCompletion(latestTodo, result.content, result.toolResults, newArtifacts);
+        const fallbackCompletion = buildFallbackCompletion(
+          latestTodo,
+          result.content,
+          result.toolResults,
+          newArtifacts,
+        );
         await this.input.toolRunner.run(
           "plan_todos",
           {
@@ -160,14 +194,26 @@ export class ExecutionUnitRunner {
             sandboxRefs: fallbackCompletion.sandboxRefs,
             fileRefs: fallbackCompletion.fileRefs,
             evidenceRefs: fallbackCompletion.evidenceRefs,
-            nextContext: fallbackCompletion.nextContextSummary
+            nextContext: fallbackCompletion.nextContextSummary,
           },
-          { traceParentId: traceNodeId, traceMetadata: { phase: "execution", todoId: todo.id, reason: "runtime_completion_fallback" } }
+          {
+            traceParentId: traceNodeId,
+            traceMetadata: {
+              phase: "execution",
+              todoId: todo.id,
+              reason: "runtime_completion_fallback",
+            },
+          },
         );
         latestTodo = this.findTodo(todo.id) ?? latestTodo;
       }
 
-      const completion = buildCompletionFromTodo(latestTodo, result.content, result.toolResults, newArtifacts);
+      const completion = buildCompletionFromTodo(
+        latestTodo,
+        result.content,
+        result.toolResults,
+        newArtifacts,
+      );
       this.input.contextManager.commitTodoCompletion(completion);
 
       this.input.eventBus.emit({
@@ -178,7 +224,7 @@ export class ExecutionUnitRunner {
         parentNodeId: this.input.parentTraceId,
         status: latestTodo.status === "failed" ? "failed" : "done",
         flowKind: latestTodo.status === "failed" ? "error" : "summary",
-        visibility: "secondary"
+        visibility: "secondary",
       });
 
       await this.input.trace?.endNode(traceNodeId, {
@@ -188,8 +234,8 @@ export class ExecutionUnitRunner {
           todo: latestTodo,
           completion,
           toolResults: result.toolResults,
-          artifacts: newArtifacts
-        }
+          artifacts: newArtifacts,
+        },
       });
       this.input.eventBus.runLogger.event("runtime.execution_unit.end", {
         todoId: todo.id,
@@ -198,37 +244,45 @@ export class ExecutionUnitRunner {
         artifactRefs: completion.artifactRefs,
         fileRefs: completion.fileRefs,
         evidenceRefs: completion.evidenceRefs,
-        sandboxRefs: completion.sandboxRefs
+        sandboxRefs: completion.sandboxRefs,
       });
 
       return this.input.todoManager.getSnapshot();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Execution unit failed.";
+      const message =
+        error instanceof Error ? error.message : "Execution unit failed.";
       await this.input.toolRunner.run(
         "plan_todos",
         {
           action: "fail",
           todoId: todo.id,
           summary: message,
-          missingCriteria: todo.doneCriteria
+          missingCriteria: todo.doneCriteria,
         },
-        { traceParentId: traceNodeId, traceMetadata: { phase: "execution", todoId: todo.id, reason: "runtime_error" } }
+        {
+          traceParentId: traceNodeId,
+          traceMetadata: {
+            phase: "execution",
+            todoId: todo.id,
+            reason: "runtime_error",
+          },
+        },
       );
       await this.input.trace?.endNode(traceNodeId, {
         status: "error",
         summary: message,
         error,
         output: {
-          todo: this.findTodo(todo.id)
-        }
+          todo: this.findTodo(todo.id),
+        },
       });
       this.input.eventBus.runLogger.event(
         "runtime.execution_unit.fail",
         {
           todoId: todo.id,
-          error: message
+          error: message,
         },
-        "error"
+        "error",
       );
       return this.input.todoManager.getSnapshot();
     } finally {
@@ -242,12 +296,14 @@ export class ExecutionUnitRunner {
       userRequest: this.input.prompt,
       profile: this.input.profile,
       currentTodo: todo,
-      todoPlan
+      todoPlan,
     });
   }
 
   private findTodo(todoId: string): Todo | undefined {
-    return this.input.todoManager.getSnapshot().find((todo) => todo.id === todoId);
+    return this.input.todoManager
+      .getSnapshot()
+      .find((todo) => todo.id === todoId);
   }
 }
 
@@ -255,10 +311,16 @@ function buildCompletionFromTodo(
   todo: Todo,
   loopContent: string,
   toolResults: AgentLoopToolResult[],
-  artifacts: Artifact[]
+  artifacts: Artifact[],
 ): TodoCompletion {
-  const fallback = buildFallbackCompletion(todo, loopContent, toolResults, artifacts);
-  const completedWork = todo.summary ?? todo.outputSummary ?? fallback.completedWork;
+  const fallback = buildFallbackCompletion(
+    todo,
+    loopContent,
+    toolResults,
+    artifacts,
+  );
+  const completedWork =
+    todo.summary ?? todo.outputSummary ?? fallback.completedWork;
 
   return {
     todoId: todo.id,
@@ -271,7 +333,7 @@ function buildCompletionFromTodo(
     evidenceRefs: normalizeRefs(todo.evidenceRefs, fallback.evidenceRefs),
     decisions: [],
     nextContextSummary: todo.nextContext ?? completedWork,
-    missingCriteria: todo.missingCriteria
+    missingCriteria: todo.missingCriteria,
   };
 }
 
@@ -279,7 +341,7 @@ function buildFallbackCompletion(
   todo: Todo,
   loopContent: string,
   toolResults: AgentLoopToolResult[],
-  artifacts: Artifact[]
+  artifacts: Artifact[],
 ): TodoCompletion {
   const outputs = deriveOutputRefs(artifacts, toolResults);
   const artifactRefs = outputs
@@ -310,18 +372,21 @@ function buildFallbackCompletion(
     fileRefs,
     evidenceRefs,
     decisions: [],
-    nextContextSummary: completedWork
+    nextContextSummary: completedWork,
   };
 }
 
-function deriveOutputRefs(artifacts: Artifact[], toolResults: AgentLoopToolResult[]): TodoOutputRef[] {
+function deriveOutputRefs(
+  artifacts: Artifact[],
+  toolResults: AgentLoopToolResult[],
+): TodoOutputRef[] {
   return [
     ...artifacts.map<TodoOutputRef>((artifact) => ({
       type: "artifact",
       id: artifact.id,
       title: artifact.title,
       kind: artifact.kind,
-      summary: artifact.description
+      summary: artifact.description,
     })),
     ...toolResults.map<TodoOutputRef>((toolResult) => ({
       type: inferToolOutputType(toolResult.toolName),
@@ -329,8 +394,8 @@ function deriveOutputRefs(artifacts: Artifact[], toolResults: AgentLoopToolResul
       path: readToolPath(toolResult.data),
       url: readToolUrl(toolResult.data),
       summary: toolResult.summary ?? toolResult.error,
-      kind: toolResult.ok ? "success" : "error"
-    }))
+      kind: toolResult.ok ? "success" : "error",
+    })),
   ];
 }
 
@@ -361,9 +426,17 @@ function readToolPath(data: unknown): string | undefined {
     return data.path;
   }
 
-  if ("artifact" in data && data.artifact && typeof data.artifact === "object" && "metadata" in data.artifact) {
+  if (
+    "artifact" in data &&
+    data.artifact &&
+    typeof data.artifact === "object" &&
+    "metadata" in data.artifact
+  ) {
     const metadata = data.artifact.metadata;
-    return metadata && typeof metadata === "object" && "sourcePath" in metadata && typeof metadata.sourcePath === "string"
+    return metadata &&
+      typeof metadata === "object" &&
+      "sourcePath" in metadata &&
+      typeof metadata.sourcePath === "string"
       ? metadata.sourcePath
       : undefined;
   }
@@ -372,9 +445,17 @@ function readToolPath(data: unknown): string | undefined {
 }
 
 function readToolUrl(data: unknown): string | undefined {
-  return data && typeof data === "object" && "url" in data && typeof data.url === "string" ? data.url : undefined;
+  return data &&
+    typeof data === "object" &&
+    "url" in data &&
+    typeof data.url === "string"
+    ? data.url
+    : undefined;
 }
 
-function normalizeRefs(value: string[] | undefined, fallback: string[]): string[] {
+function normalizeRefs(
+  value: string[] | undefined,
+  fallback: string[],
+): string[] {
   return value?.length ? value : fallback;
 }
