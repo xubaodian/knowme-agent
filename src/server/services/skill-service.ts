@@ -3,7 +3,7 @@ import { SkillRegistry } from "../../agent/skills/skill-registry.js";
 import type { ListSkillsResponse, SkillOption } from "../../shared/types.js";
 
 export const genericProfileName = "general-agent";
-const defaultSkillName = process.env.KNOWME_DEFAULT_SKILL || "general-task";
+const defaultSkillName = process.env.KNOWME_DEFAULT_SKILL || genericProfileName;
 
 export async function listSkillOptions(): Promise<ListSkillsResponse> {
   const skills = await getSkillRegistry().listSkills();

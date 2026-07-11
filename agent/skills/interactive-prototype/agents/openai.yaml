@@ -1,0 +1,4 @@
+interface:
+  display_name: "交互原型工坊"
+  short_description: "Build polished clickable product demos from a short idea"
+  default_prompt: "Use $interactive-prototype to turn my product idea into a polished clickable prototype."

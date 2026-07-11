@@ -1,0 +1,4 @@
+interface:
+  display_name: "决策模拟器"
+  short_description: "Explore tradeoffs with live inputs and scenario comparisons"
+  default_prompt: "Use $what-if-simulator to build an interactive simulator for my decision scenario."

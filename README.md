@@ -50,7 +50,7 @@ npm run dev
 ## How to use it
 
 1. 在工作台新建会话并输入任务。
-2. 选择模型和 Skill。内置 `general-task` 用于通用任务，`html-report` 用于生成并验证自包含 HTML 报告。
+2. 选择模型和 Skill。`general-agent` 用于通用任务，也可选择对应场景的专用 Skill。
 3. 提交后，在 Agent Flow 中查看计划、Todo、工具执行和阶段性结果。
 4. 在右侧工作区查看浏览器、代码、文件、命令执行和 Artifact 预览。
 5. 任务结束后，可在会话时间线中回看 Run、事件和交付物。

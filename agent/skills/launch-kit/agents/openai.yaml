@@ -1,0 +1,4 @@
+interface:
+  display_name: "发布创意包"
+  short_description: "Create a cohesive microsite, social visual, and launch copy"
+  default_prompt: "Use $launch-kit to create a polished launch package for my product."

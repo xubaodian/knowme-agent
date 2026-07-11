@@ -106,9 +106,9 @@ Artifact 的 `display.mode` 可为 `inline`、`button`、`preview`、`download` 
 
 Skill 是以目录组织的能力描述，核心文件是 `SKILL.md`，并可引用 `references/`、`scripts/`、`assets/` 等资源。当前版本不在 Runtime 内部动态选择多个 Skill：前端在任务开始前选定一个 Skill，服务端校验后将其复制进本 Run 的工作目录。这样可以保证执行时所用说明与后续回放一致，也避免模型在执行过程中随意切换能力范围。
 
-当前内置：
+当前可选：
 
-- `general-task`：通用的任务规划、工具使用、产物生成与简洁总结。
+- `general-agent`：不加载专用 Skill 的通用执行 Profile。
 - `html-report`：从用户材料生成自包含 HTML 报告，包含叙事组织、主题选择、实现、截图验证和 Artifact 发布流程。
 
 ### 模型 Provider：保持 API 兼容边界
