@@ -65,7 +65,7 @@ export class FinalizationRunner {
         parentTraceId: traceNodeId,
         allowedTools: ["finish_task"],
         toolChoice: "required",
-        maxIterations: 15,
+        maxIterations: 20,
         llmMessages: [
           {
             role: "system",

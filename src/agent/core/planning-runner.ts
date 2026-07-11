@@ -31,18 +31,21 @@ export class PlanningRunner {
       summary: "Create the execution plan with plan_todos.",
       input: {
         prompt: this.input.prompt,
-        profile: summarizeProfile(this.input.profile)
+        profile: summarizeProfile(this.input.profile),
       },
       metadata: {
         phase: "planning",
-        profileMode: this.input.profile.mode
-      }
+        profileMode: this.input.profile.mode,
+      },
     });
-    this.input.eventBus.setActiveNode({ id: traceNodeId ?? "planning", parentId: this.input.parentTraceId });
+    this.input.eventBus.setActiveNode({
+      id: traceNodeId ?? "planning",
+      parentId: this.input.parentTraceId,
+    });
 
     try {
       this.input.eventBus.runLogger.event("runtime.planning.start", {
-        profile: summarizeProfile(this.input.profile)
+        profile: summarizeProfile(this.input.profile),
       });
       this.input.eventBus.emit({
         type: "thought.created",
@@ -52,7 +55,7 @@ export class PlanningRunner {
         parentNodeId: this.input.parentTraceId,
         status: "running",
         flowKind: "thought",
-        visibility: "primary"
+        visibility: "primary",
       });
 
       await runAgentLoop({
@@ -65,12 +68,15 @@ export class PlanningRunner {
         parentTraceId: traceNodeId,
         allowedTools: ["plan_todos"],
         toolChoice: "required",
-        maxIterations: 6,
+        maxIterations: 20,
         stopAfterSuccessfulToolCall: true,
         llmMessages: [
-          { role: "system", content: await buildPlanningPrompt({ profile: this.input.profile }) },
-          { role: "user", content: this.input.prompt }
-        ]
+          {
+            role: "system",
+            content: await buildPlanningPrompt({ profile: this.input.profile }),
+          },
+          { role: "user", content: this.input.prompt },
+        ],
       });
 
       const plan = await this.ensurePlan(traceNodeId);
@@ -78,19 +84,19 @@ export class PlanningRunner {
         goal: plan.goal,
         todoCount: plan.todos.length,
         todoIds: plan.todos.map((todo) => todo.id),
-        todoTitles: plan.todos.map((todo) => todo.title)
+        todoTitles: plan.todos.map((todo) => todo.title),
       });
       await this.input.trace?.endNode(traceNodeId, {
         status: "success",
         summary: `Planned ${plan.todos.length} execution unit(s).`,
-        output: plan
+        output: plan,
       });
       return plan;
     } catch (error) {
       await this.input.trace?.endNode(traceNodeId, {
         status: "error",
         summary: error instanceof Error ? error.message : "Planning failed.",
-        error
+        error,
       });
       throw error;
     } finally {
@@ -108,9 +114,12 @@ export class PlanningRunner {
         {
           action: "create",
           goal: this.input.prompt.slice(0, 200),
-          todos: [fallback]
+          todos: [fallback],
         },
-        { traceParentId: parentTraceId, traceMetadata: { phase: "planning", reason: "fallback_plan" } }
+        {
+          traceParentId: parentTraceId,
+          traceMetadata: { phase: "planning", reason: "fallback_plan" },
+        },
       );
       plan = result.data as ExecutionPlan;
     }
@@ -120,9 +129,12 @@ export class PlanningRunner {
         "plan_todos",
         {
           action: "update",
-          goal: this.input.prompt.slice(0, 200)
+          goal: this.input.prompt.slice(0, 200),
         },
-        { traceParentId: parentTraceId, traceMetadata: { phase: "planning", reason: "fallback_goal" } }
+        {
+          traceParentId: parentTraceId,
+          traceMetadata: { phase: "planning", reason: "fallback_goal" },
+        },
       );
       plan = result.data as ExecutionPlan;
     }
@@ -137,7 +149,10 @@ function createFallbackTodo(prompt: string): Omit<Todo, "status"> {
     title: "Execute request",
     description: "Complete the user request as one isolated execution unit.",
     expectedOutput: `A concrete completed result for: ${prompt.slice(0, 160)}`,
-    doneCriteria: ["The requested work is completed through tools.", "A concise summary or deliverable is recorded."]
+    doneCriteria: [
+      "The requested work is completed through tools.",
+      "A concise summary or deliverable is recorded.",
+    ],
   };
 }
 
@@ -147,7 +162,7 @@ function summarizeProfile(profile: ExecutionProfile) {
         mode: profile.mode,
         skillName: profile.skillName,
         description: profile.description,
-        path: profile.path
+        path: profile.path,
       }
     : profile;
 }
