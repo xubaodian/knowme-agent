@@ -13,10 +13,13 @@ import {
   X
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { buildRunFlowViewModel } from "../../shared/run-flow-view-model";
 import type { RunWorkbenchResource } from "../../shared/run-flow-view-model";
 import type { Artifact, Run, RunEvent } from "../../shared/types";
+import { getRunWorkspaceFile, getRunWorkspaceFileDownloadUrl, listRunWorkspaceFiles } from "../api/client";
+import type { WorkspaceFile } from "../api/client";
 import { ArtifactKindIcon, ArtifactRenderer, getArtifactDownload } from "./artifact-renderers";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -39,6 +42,14 @@ export function ArtifactPreviewPanel({
   onOpenArtifact: (artifactId: string) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedWorkspaceArtifact, setSelectedWorkspaceArtifact] = useState<Artifact>();
+  const [workspaceFileError, setWorkspaceFileError] = useState<string>();
+  const workspaceFilesQuery = useQuery({
+    queryKey: ["run-workspace-files", activeRun?.id, activeRun?.status],
+    queryFn: () => listRunWorkspaceFiles(activeRun!.id),
+    enabled: Boolean(activeRun),
+    refetchInterval: activeRun?.status === "running" ? 1500 : false
+  });
   const flow = useMemo(
     () =>
       activeRun
@@ -51,8 +62,44 @@ export function ArtifactPreviewPanel({
         : undefined,
     [activeRun, artifacts, events]
   );
-  const selectedDownload = selectedArtifact ? getArtifactDownload(selectedArtifact) : undefined;
-  const subtitle = selectedArtifact ? selectedArtifact.title : "预览、文档、代码与执行记录";
+  const previewArtifact = selectedArtifact ?? selectedWorkspaceArtifact;
+  const selectedDownload = previewArtifact ? getArtifactDownload(previewArtifact) : undefined;
+  const subtitle = previewArtifact ? previewArtifact.title : "预览、文档、代码与执行记录";
+
+  useEffect(() => {
+    setSelectedWorkspaceArtifact(undefined);
+    setWorkspaceFileError(undefined);
+  }, [activeRun?.id]);
+
+  async function openWorkspaceFile(file: WorkspaceFile) {
+    if (!activeRun) return;
+
+    setWorkspaceFileError(undefined);
+
+    try {
+      const content = await getRunWorkspaceFile(activeRun.id, file.path);
+      setSelectedWorkspaceArtifact(toWorkspaceArtifact(activeRun, content.path, content.content));
+    } catch (error) {
+      setWorkspaceFileError(error instanceof Error ? error.message : "文件读取失败");
+    }
+  }
+
+  async function downloadWorkspaceFile(file: WorkspaceFile) {
+    if (!activeRun) return;
+    const anchor = document.createElement("a");
+    anchor.download = fileName(file.path);
+    anchor.href = getRunWorkspaceFileDownloadUrl(activeRun.id, file.path);
+    anchor.click();
+  }
+
+  function closePreview() {
+    if (selectedWorkspaceArtifact) {
+      setSelectedWorkspaceArtifact(undefined);
+      return;
+    }
+
+    onCloseArtifact();
+  }
 
   return (
     <aside
@@ -88,8 +135,8 @@ export function ArtifactPreviewPanel({
           >
             {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
-          {selectedArtifact ? (
-            <Button onClick={onCloseArtifact} size="icon" type="button" variant="ghost" title="返回工作区">
+          {previewArtifact ? (
+            <Button onClick={closePreview} size="icon" type="button" variant="ghost" title="返回工作区">
               <X className="size-4" />
             </Button>
           ) : null}
@@ -98,13 +145,17 @@ export function ArtifactPreviewPanel({
 
       <div className="flex min-h-0 flex-1 flex-col px-3.5 pb-3.5">
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-preview-surface shadow-[var(--shadow-soft)]">
-          {selectedArtifact ? (
-            <PreviewFrame artifact={selectedArtifact} />
+          {previewArtifact ? (
+            <PreviewFrame artifact={previewArtifact} />
           ) : (
             <WorkspaceHome
               artifacts={artifacts}
+              onDownloadWorkspaceFile={downloadWorkspaceFile}
               onOpenArtifact={onOpenArtifact}
+              onOpenWorkspaceFile={openWorkspaceFile}
               resources={flow?.workbenchResources ?? []}
+              workspaceFiles={workspaceFilesQuery.data ?? []}
+              workspaceFileError={workspaceFileError}
             />
           )}
         </div>
@@ -152,32 +203,31 @@ const PreviewFrame = memo(function PreviewFrame({ artifact }: { artifact: Artifa
 
 const WorkspaceHome = memo(function WorkspaceHome({
   artifacts,
+  onDownloadWorkspaceFile,
   onOpenArtifact,
-  resources
+  onOpenWorkspaceFile,
+  resources,
+  workspaceFiles,
+  workspaceFileError
 }: {
   artifacts: Artifact[];
+  onDownloadWorkspaceFile: (file: WorkspaceFile) => void;
   onOpenArtifact: (artifactId: string) => void;
+  onOpenWorkspaceFile: (file: WorkspaceFile) => void;
   resources: RunWorkbenchResource[];
+  workspaceFiles: WorkspaceFile[];
+  workspaceFileError?: string;
 }) {
-  const groups = useMemo(
-    () => ({
-      latestBrowser: [...resources].reverse().find((resource) => resource.kind === "browser"),
-      commands: resources.filter((resource) => resource.kind === "command"),
-      documents: artifacts.filter(isDocumentArtifact),
-      code: artifacts.filter(isCodeArtifact),
-      files: artifacts.filter(isFileArtifact)
-    }),
-    [artifacts, resources]
-  );
+  const groups = useMemo(() => buildWorkspaceGroups(artifacts, resources, workspaceFiles), [artifacts, resources, workspaceFiles]);
 
   return (
     <Tabs className="flex min-h-0 flex-1 flex-col" defaultValue="preview">
       <div className="shrink-0 px-3 pt-3">
         <TabsList className="h-10 w-full justify-start gap-1 overflow-x-auto rounded-xl bg-muted/50 p-1">
           <WorkspaceTab icon={<Globe2 className="size-3.5" />} label="预览" value="preview" />
-          <WorkspaceTab count={groups.documents.length} icon={<FileText className="size-3.5" />} label="文档" value="documents" />
-          <WorkspaceTab count={groups.code.length} icon={<Code2 className="size-3.5" />} label="代码" value="code" />
-          <WorkspaceTab count={groups.files.length} icon={<FolderOpen className="size-3.5" />} label="文件" value="files" />
+          <WorkspaceTab count={groups.documents.artifacts.length + groups.documents.resources.length} icon={<FileText className="size-3.5" />} label="文档" value="documents" />
+          <WorkspaceTab count={groups.code.artifacts.length + groups.code.resources.length} icon={<Code2 className="size-3.5" />} label="代码" value="code" />
+          <WorkspaceTab count={groups.files.artifacts.length + groups.files.resources.length} icon={<FolderOpen className="size-3.5" />} label="文件" value="files" />
           <WorkspaceTab count={groups.commands.length} icon={<Terminal className="size-3.5" />} label="Shell" value="shell" />
         </TabsList>
       </div>
@@ -192,14 +242,15 @@ const WorkspaceHome = memo(function WorkspaceHome({
         </WorkspaceScroll>
       </TabsContent>
       <TabsContent className="mt-0 min-h-0 flex-1" value="documents">
-        <ArtifactGroup artifacts={groups.documents} empty="报告、Markdown、表格与演示文档会显示在这里。" onOpenArtifact={onOpenArtifact} />
+        <WorkspaceItemGroup group={groups.documents} empty="报告、Markdown 与表格会显示在这里。" onDownloadWorkspaceFile={onDownloadWorkspaceFile} onOpenArtifact={onOpenArtifact} onOpenWorkspaceFile={onOpenWorkspaceFile} />
       </TabsContent>
       <TabsContent className="mt-0 min-h-0 flex-1" value="code">
-        <ArtifactGroup artifacts={groups.code} empty="生成的代码和 JSON 会显示在这里。" onOpenArtifact={onOpenArtifact} />
+        <WorkspaceItemGroup group={groups.code} empty="生成的代码、HTML 和 JSON 会显示在这里。" onDownloadWorkspaceFile={onDownloadWorkspaceFile} onOpenArtifact={onOpenArtifact} onOpenWorkspaceFile={onOpenWorkspaceFile} />
       </TabsContent>
       <TabsContent className="mt-0 min-h-0 flex-1" value="files">
-        <ArtifactGroup artifacts={groups.files} empty="图片及其他输出文件会显示在这里。" onOpenArtifact={onOpenArtifact} />
+        <WorkspaceItemGroup group={groups.files} empty="图片及其他输出文件会显示在这里。" onDownloadWorkspaceFile={onDownloadWorkspaceFile} onOpenArtifact={onOpenArtifact} onOpenWorkspaceFile={onOpenWorkspaceFile} />
       </TabsContent>
+      {workspaceFileError ? <p className="shrink-0 px-4 pb-3 text-xs text-destructive">{workspaceFileError}</p> : null}
       <TabsContent className="mt-0 min-h-0 flex-1" value="shell">
         <WorkspaceScroll>
           {groups.commands.length > 0 ? (
@@ -225,11 +276,28 @@ function WorkspaceTab({ count, icon, label, value }: { count?: number; icon: Rea
   );
 }
 
-function ArtifactGroup({ artifacts, empty, onOpenArtifact }: { artifacts: Artifact[]; empty: string; onOpenArtifact: (artifactId: string) => void }) {
+function WorkspaceItemGroup({
+  empty,
+  group,
+  onDownloadWorkspaceFile,
+  onOpenArtifact,
+  onOpenWorkspaceFile
+}: {
+  empty: string;
+  group: WorkspaceGroup;
+  onDownloadWorkspaceFile: (file: WorkspaceFile) => void;
+  onOpenArtifact: (artifactId: string) => void;
+  onOpenWorkspaceFile: (file: WorkspaceFile) => void;
+}) {
+  const hasItems = group.artifacts.length > 0 || group.resources.length > 0;
+
   return (
     <WorkspaceScroll>
-      {artifacts.length > 0 ? (
-        <div className="space-y-2">{artifacts.map((artifact) => <ArtifactRow artifact={artifact} key={artifact.id} onOpenArtifact={onOpenArtifact} />)}</div>
+      {hasItems ? (
+        <div className="space-y-2">
+          {group.artifacts.map((artifact) => <ArtifactRow artifact={artifact} key={artifact.id} onOpenArtifact={onOpenArtifact} />)}
+          {group.resources.map((file) => <WorkspaceFileRow file={file} key={file.path} onDownload={onDownloadWorkspaceFile} onOpen={onOpenWorkspaceFile} />)}
+        </div>
       ) : (
         <EmptyState icon={<PackageOpen className="size-5" />} title="暂无内容" description={empty} />
       )}
@@ -252,6 +320,41 @@ const BrowserSurface = memo(function BrowserSurface({ resource }: { resource: Ru
         </div>
       )}
       {resource.summary ? <p className="px-3.5 py-3 text-xs leading-5 text-muted-foreground">{resource.summary}</p> : null}
+    </div>
+  );
+});
+
+const WorkspaceFileRow = memo(function WorkspaceFileRow({
+  file,
+  onDownload,
+  onOpen
+}: {
+  file: WorkspaceFile;
+  onDownload: (file: WorkspaceFile) => void;
+  onOpen: (file: WorkspaceFile) => void;
+}) {
+  const canOpen = canPreviewWorkspaceFile(file.path);
+  const icon = isCodePath(file.path) ? <Code2 className="size-4" /> : <FileText className="size-4" />;
+  const details = (
+    <>
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-background/80 text-foreground shadow-sm">{icon}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium">{fileName(file.path)}</span>
+        <span className="mt-0.5 block text-[11px] text-muted-foreground">{workspaceFileKind(file.path)} · ready</span>
+      </span>
+    </>
+  );
+
+  return (
+    <div className="group flex items-center justify-between gap-3 rounded-xl bg-muted/28 p-3 transition-colors hover:bg-muted/55">
+      {canOpen ? (
+        <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => onOpen(file)} type="button">{details}</button>
+      ) : (
+        <div className="flex min-w-0 flex-1 items-center gap-3">{details}</div>
+      )}
+      <button className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-background hover:text-primary" onClick={() => onDownload(file)} title={`下载 ${fileName(file.path)}`} type="button">
+        <Download className="size-4" />
+      </button>
     </div>
   );
 });
@@ -322,4 +425,90 @@ function isCodeArtifact(artifact: Artifact): boolean {
 
 function isFileArtifact(artifact: Artifact): boolean {
   return artifact.kind === "image" || artifact.kind === "file";
+}
+
+type WorkspaceGroup = {
+  artifacts: Artifact[];
+  resources: WorkspaceFile[];
+};
+
+function buildWorkspaceGroups(artifacts: Artifact[], resources: RunWorkbenchResource[], workspaceFiles: WorkspaceFile[]) {
+  const visibleArtifacts = artifacts.filter((artifact) => artifact.display.mode !== "hidden");
+  const publishedPaths = new Set(visibleArtifacts.map(readArtifactSourcePath).filter((path): path is string => Boolean(path)));
+  const files = workspaceFiles.filter((file) => !publishedPaths.has(file.path));
+
+  return {
+    latestBrowser: [...resources].reverse().find((resource) => resource.kind === "browser"),
+    commands: resources.filter((resource) => resource.kind === "command"),
+    documents: {
+      artifacts: visibleArtifacts.filter(isDocumentArtifact),
+      resources: files.filter((file) => isDocumentPath(file.path))
+    } satisfies WorkspaceGroup,
+    code: {
+      artifacts: visibleArtifacts.filter(isCodeArtifact),
+      resources: files.filter((file) => isCodePath(file.path))
+    } satisfies WorkspaceGroup,
+    files: {
+      artifacts: visibleArtifacts.filter(isFileArtifact),
+      resources: files.filter((file) => !isDocumentPath(file.path) && !isCodePath(file.path))
+    } satisfies WorkspaceGroup
+  };
+}
+
+function readArtifactSourcePath(artifact: Artifact): string | undefined {
+  const path = artifact.metadata?.sourcePath;
+  return typeof path === "string" ? path : undefined;
+}
+
+function isDocumentPath(path: string): boolean {
+  return hasExtension(path, ["md", "mdx", "txt", "csv", "pdf", "ppt", "pptx"]);
+}
+
+function isCodePath(path: string): boolean {
+  return hasExtension(path, ["css", "html", "htm", "js", "jsx", "json", "mjs", "cjs", "py", "sh", "sql", "ts", "tsx", "xml", "yaml", "yml"]);
+}
+
+function hasExtension(path: string, extensions: string[]): boolean {
+  const extension = path.split(/[?#]/, 1)[0]?.split(".").at(-1)?.toLowerCase();
+  return Boolean(extension && extensions.includes(extension));
+}
+
+function fileName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function canPreviewWorkspaceFile(path: string): boolean {
+  return hasExtension(path, ["md", "mdx", "txt", "csv"]) || isCodePath(path);
+}
+
+function workspaceFileKind(path: string): string {
+  if (hasExtension(path, ["md", "mdx"])) return "markdown";
+  if (hasExtension(path, ["txt", "csv"])) return "text";
+  return isCodePath(path) ? "code" : "file";
+}
+
+function toWorkspaceArtifact(run: Run, path: string, content: string): Artifact {
+  const now = new Date().toISOString();
+  const base = {
+    id: `workspace:${run.id}:${path}`,
+    runId: run.id,
+    chatId: run.chatId,
+    title: fileName(path),
+    status: "ready" as const,
+    createdAt: now,
+    updatedAt: now,
+    version: 1,
+    display: { mode: "preview" as const },
+    metadata: { sourcePath: path }
+  };
+
+  if (hasExtension(path, ["md", "mdx"])) {
+    return { ...base, kind: "markdown", content };
+  }
+
+  if (isCodePath(path)) {
+    return { ...base, kind: "code", language: path.split(".").at(-1) ?? "text", content };
+  }
+
+  return { ...base, kind: "text", content };
 }

@@ -192,10 +192,6 @@ export function App() {
 
       mergeRunEvent(queryClient, runEvent);
 
-      if (runEvent.payload?.artifact && canPreviewArtifact(runEvent.payload.artifact)) {
-        setSelectedArtifactId((current) => current ?? runEvent.payload?.artifact?.id);
-      }
-
       if (runEvent.type === "run.completed" || runEvent.type === "run.failed") {
         source.close();
         void queryClient.invalidateQueries({ queryKey: ["chat-timeline", runEvent.chatId] });
@@ -332,13 +328,6 @@ function chooseActiveRun(runs: Run[]): Run | undefined {
 
 function isTerminalRun(run: Run): boolean {
   return run.status === "completed" || run.status === "failed";
-}
-
-function canPreviewArtifact(artifact: Artifact) {
-  return (
-    (artifact.display.mode === "button" || artifact.display.mode === "preview" || artifact.display.mode === "inline") &&
-    artifact.display.previewTarget !== "none"
-  );
 }
 
 function mergeRunEvent(queryClient: ReturnType<typeof useQueryClient>, event: RunEvent) {

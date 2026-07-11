@@ -82,6 +82,25 @@ export async function listRunArtifacts(runId: string): Promise<Artifact[]> {
   return payload.artifacts;
 }
 
+export async function getRunWorkspaceFile(runId: string, path: string): Promise<{ path: string; content: string }> {
+  return request<{ path: string; content: string }>(`/api/runs/${runId}/files/content?path=${encodeURIComponent(path)}`);
+}
+
+export function getRunWorkspaceFileDownloadUrl(runId: string, path: string): string {
+  return `/api/runs/${runId}/files/download?path=${encodeURIComponent(path)}`;
+}
+
+export type WorkspaceFile = {
+  path: string;
+  size: number;
+  updatedAt: string;
+};
+
+export async function listRunWorkspaceFiles(runId: string): Promise<WorkspaceFile[]> {
+  const payload = await request<{ files: WorkspaceFile[] }>(`/api/runs/${runId}/files`);
+  return payload.files;
+}
+
 export async function listDebugRuns(): Promise<RunTraceSummary[]> {
   const payload = await request<{ runs: RunTraceSummary[] }>("/api/debug/runs");
   return payload.runs;
