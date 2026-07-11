@@ -124,6 +124,16 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         traceParentId: loopTraceNodeId,
         phase: options.name,
         iteration,
+        onRetry: ({ nextAttempt, maxAttempts, delayMs, error }) => {
+          options.eventBus.emit({
+            type: "thought.created",
+            title: "模型调用重试",
+            detail: `${error}；${delayMs}ms 后进行第 ${nextAttempt}/${maxAttempts} 次尝试。`,
+            status: "running",
+            flowKind: "thought",
+            visibility: "secondary"
+          });
+        },
         request: {
           messages,
           tools: toolDefinitions,
